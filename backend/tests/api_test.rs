@@ -3,7 +3,7 @@
 // TEST_DATABASE_URL they exit early, so `cargo test` passes with no
 // database. Set e.g.:
 //
-//	TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/rust_template_test?sslmode=disable \
+//	TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/inventory_test?sslmode=disable \
 //	  cargo test --test api_test
 //
 // Every test creates its own uniquely-addressed fixtures (unique email per
@@ -55,6 +55,9 @@ fn test_config(env: &str) -> Config {
         max_attempts: 3,
         email_verification_required: false, // same bypass the Node tests use
         jwt_secret: "test-secret".to_string(),
+        // Empty url disables Elasticsearch — search falls back to Postgres.
+        elasticsearch_url: String::new(),
+        search_index: "products".to_string(),
     }
 }
 
@@ -87,7 +90,7 @@ async fn new_test_env() -> Option<TestEnv> {
     Some(TestEnv {
         router,
         pool,
-        email: format!("rusttest-{run}-{nano}@mail.com", nano = nanos % 100_000),
+        email: format!("rusttest-{run}-{nanos}@mail.com"),
         password: "Valid123!".to_string(),
     })
 }
@@ -801,6 +804,1058 @@ async fn two_factor_login() {
     assert_ne!(body["twoFactorRequired"], json!(true), "{body}");
     let token2 = body["token"].as_str().unwrap_or_default().to_string();
     assert!(!token2.is_empty() && token2 != pending, "{body}");
+
+    env.cleanup().await;
+}
+
+// ---- Step 1: health ----
+
+#[tokio::test]
+async fn health_reports_database_status() {
+    let Some(env) = new_test_env().await else {
+        return;
+    };
+    let (status, body) = do_json(&env.router, "GET", "/api/health", "", None).await;
+    assert_eq!(status, StatusCode::OK, "body {body}");
+    assert_eq!(body["status"], json!("ok"), "{body}");
+    assert_eq!(body["service"], json!("rust-api"), "{body}");
+    assert_eq!(body["database"], json!("ok"), "{body}");
+    env.cleanup().await;
+}
+
+// ---- Step 2: catalog ----
+
+// Signs up, logs in, fills the profile, grants staff. Returns the JWT.
+async fn staff_session(env: &TestEnv) -> String {
+    do_json(
+        &env.router,
+        "POST",
+        "/api/signup",
+        "",
+        Some(json!({ "email": &env.email, "password": &env.password })),
+    )
+    .await;
+    let token = login_as(env, &env.email, &env.password).await;
+    fill_profile(env, &token).await;
+    set_role(env, &env.email, "staff").await;
+    token
+}
+
+#[tokio::test]
+async fn brands_and_categories_flow() {
+    let Some(env) = new_test_env().await else {
+        return;
+    };
+    let token = staff_session(&env).await;
+    // Unique per run so reruns against a dirty database still pass.
+    let run = env.email.split('@').next().unwrap_or("run").to_string();
+
+    // Brands: create → duplicate → list. The normalized name is the unique key,
+    // so case differences collide too.
+    let (status, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/brands",
+        &token,
+        Some(json!({ "name": format!("Bosch-{run}") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert!(body["brand"]["id"].is_string(), "{body}");
+
+    let (status, _) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/brands",
+        &token,
+        Some(json!({ "name": format!("bosch-{run}") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "duplicate brand");
+
+    let (status, body) = do_json(&env.router, "GET", "/api/v1/brands", &token, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["brands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b["name"] == format!("Bosch-{run}")),
+        "{body}"
+    );
+
+    // Categories: create → duplicate → list.
+    let (status, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/categories",
+        &token,
+        Some(json!({ "name": format!("Brakes-{run}") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, _) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/categories",
+        &token,
+        Some(json!({ "name": format!("Brakes-{run}") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "duplicate category");
+    let (status, body) = do_json(&env.router, "GET", "/api/v1/categories", &token, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["name"] == format!("Brakes-{run}")),
+        "{body}"
+    );
+
+    // Blank names are 400s.
+    let (status, _) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/brands",
+        &token,
+        Some(json!({ "name": "   " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    env.cleanup().await;
+}
+
+// Reads are open to any signed-in user; writes are staff+.
+#[tokio::test]
+async fn clients_cannot_write_catalog() {
+    let Some(env) = new_test_env().await else {
+        return;
+    };
+    do_json(
+        &env.router,
+        "POST",
+        "/api/signup",
+        "",
+        Some(json!({ "email": &env.email, "password": &env.password })),
+    )
+    .await;
+    let token = login_as(&env, &env.email, &env.password).await;
+    fill_profile(&env, &token).await;
+
+    for path in [
+        "/api/v1/brands",
+        "/api/v1/categories",
+        "/api/v1/products",
+        "/api/v1/warehouses",
+        "/api/v1/inventory/receive",
+        "/api/v1/suppliers",
+    ] {
+        let (status, body) = do_json(
+            &env.router,
+            "POST",
+            path,
+            &token,
+            Some(json!({ "name": "x", "sku": "x" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+    }
+    let (status, _) = do_json(&env.router, "GET", "/api/v1/brands", &token, None).await;
+    assert_eq!(status, StatusCode::OK);
+    env.cleanup().await;
+}
+
+#[tokio::test]
+async fn products_crud_flow() {
+    let Some(env) = new_test_env().await else {
+        return;
+    };
+    let token = staff_session(&env).await;
+    set_role(&env, &env.email, "admin").await; // delete is admin-only
+    let run = env.email.split('@').next().unwrap_or("run").to_string();
+
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/brands",
+        &token,
+        Some(json!({ "name": format!("Moog-{run}") })),
+    )
+    .await;
+    let brand_id = body["brand"]["id"].as_str().expect("brand id").to_string();
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/categories",
+        &token,
+        Some(json!({ "name": format!("Suspension-{run}") })),
+    )
+    .await;
+    let category_id = body["category"]["id"]
+        .as_str()
+        .expect("category id")
+        .to_string();
+
+    let sku = format!("SKU-{run}");
+    let mpn = format!("RK620324-{run}");
+    let (status, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/products",
+        &token,
+        Some(json!({
+            "sku": sku, "partNumber": mpn,
+            "name": format!("Control Arm {run}"),
+            "description": "Front lower control arm",
+            "brandId": brand_id, "categoryId": category_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let product_id = body["product"]["id"]
+        .as_str()
+        .expect("product id")
+        .to_string();
+    assert_eq!(
+        body["product"]["brand"],
+        json!(format!("Moog-{run}")),
+        "{body}"
+    );
+    assert_eq!(
+        body["product"]["category"],
+        json!(format!("Suspension-{run}")),
+        "{body}"
+    );
+    // The MPN rides through product_identifiers.
+    assert_eq!(body["product"]["partNumber"], json!(mpn), "{body}");
+
+    // Missing name → 400.
+    let (status, _) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/products",
+        &token,
+        Some(json!({ "sku": format!("SKU2-{run}") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Missing brand/category → 400 (both are NOT NULL in the schema).
+    let (status, _) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/products",
+        &token,
+        Some(json!({ "sku": format!("SKU4-{run}"), "name": "x" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Duplicate SKU → 400.
+    let (status, _) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/products",
+        &token,
+        Some(json!({ "sku": sku, "name": "dup", "brandId": brand_id, "categoryId": category_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Same MPN on a second product → 400 (identifiers are globally unique).
+    let (status, _) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/products",
+        &token,
+        Some(json!({
+            "sku": format!("SKU5-{run}"), "name": "mpn thief",
+            "partNumber": mpn, "brandId": brand_id, "categoryId": category_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Unknown brand → 400 (not a 500 FK error).
+    let (status, _) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/products",
+        &token,
+        Some(json!({
+            "sku": format!("SKU3-{run}"), "name": "x",
+            "brandId": "00000000-0000-0000-0000-000000000000",
+            "categoryId": category_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // GET by id, and 404 on a missing one.
+    let (status, body) = do_json(
+        &env.router,
+        "GET",
+        &format!("/api/v1/products/{product_id}"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["product"]["name"], json!(format!("Control Arm {run}")));
+    let (status, _) = do_json(
+        &env.router,
+        "GET",
+        "/api/v1/products/00000000-0000-0000-0000-000000000099",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // List filters: text matches the SKU, the MPN, and a filter with no hits.
+    let (status, body) = do_json(
+        &env.router,
+        "GET",
+        &format!("/api/v1/products?q={sku}"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["products"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == product_id),
+        "{body}"
+    );
+    // MPN search is case-insensitive (normalized_value).
+    let (status, body) = do_json(
+        &env.router,
+        "GET",
+        &format!("/api/v1/products?q={}", mpn.to_lowercase()),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["total"], json!(1), "{body}");
+    let (status, body) = do_json(
+        &env.router,
+        "GET",
+        &format!("/api/v1/products?brand=Moog-{run}"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["total"], json!(1), "{body}");
+    let (status, body) = do_json(
+        &env.router,
+        "GET",
+        "/api/v1/products?brand=no-such-brand",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["total"], json!(0), "{body}");
+
+    // PUT: rename and change the MPN, then fields come back joined.
+    let (status, body) = do_json(
+        &env.router,
+        "PUT",
+        &format!("/api/v1/products/{product_id}"),
+        &token,
+        Some(json!({
+            "sku": sku, "name": format!("Control Arm {run} II"),
+            "partNumber": format!("RK999999-{run}"),
+            "brandId": brand_id, "categoryId": category_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["product"]["name"],
+        json!(format!("Control Arm {run} II")),
+        "{body}"
+    );
+    assert_eq!(
+        body["product"]["partNumber"],
+        json!(format!("RK999999-{run}")),
+        "{body}"
+    );
+
+    // Unknown id → 404 on both writes.
+    let (status, _) = do_json(
+        &env.router,
+        "PUT",
+        "/api/v1/products/00000000-0000-0000-0000-000000000099",
+        &token,
+        Some(json!({
+            "sku": "x", "name": "x",
+            "brandId": brand_id, "categoryId": category_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = do_json(
+        &env.router,
+        "DELETE",
+        "/api/v1/products/00000000-0000-0000-0000-000000000099",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // DELETE (admin) → gone.
+    let (status, _) = do_json(
+        &env.router,
+        "DELETE",
+        &format!("/api/v1/products/{product_id}"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = do_json(
+        &env.router,
+        "GET",
+        &format!("/api/v1/products/{product_id}"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    env.cleanup().await;
+}
+
+#[tokio::test]
+async fn inventory_flow() {
+    let Some(env) = new_test_env().await else {
+        return;
+    };
+    let token = staff_session(&env).await;
+    let run = env.email.split('@').next().unwrap_or("run").to_string();
+
+    // Catalog fixture: one product.
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/brands",
+        &token,
+        Some(json!({ "name": format!("Moog-{run}") })),
+    )
+    .await;
+    let brand_id = body["brand"]["id"].as_str().unwrap().to_string();
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/categories",
+        &token,
+        Some(json!({ "name": format!("Suspension-{run}") })),
+    )
+    .await;
+    let category_id = body["category"]["id"].as_str().unwrap().to_string();
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/products",
+        &token,
+        Some(json!({
+            "sku": format!("SKU-{run}"), "name": format!("Control Arm {run}"),
+            "brandId": brand_id, "categoryId": category_id,
+        })),
+    )
+    .await;
+    let product_id = body["product"]["id"].as_str().unwrap().to_string();
+
+    // Warehouses: create → duplicate → locations.
+    let (status, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/warehouses",
+        &token,
+        Some(json!({ "code": format!("AUS-{run}"), "name": "Austin" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let warehouse_id = body["warehouse"]["id"].as_str().unwrap().to_string();
+    let (status, _) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/warehouses",
+        &token,
+        Some(json!({ "code": format!("AUS-{run}"), "name": "Other" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "duplicate code");
+
+    let (status, body) = do_json(
+        &env.router,
+        "POST",
+        &format!("/api/v1/warehouses/{warehouse_id}/locations"),
+        &token,
+        Some(json!({ "code": "A-03-04" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let loc1 = body["location"]["id"].as_str().unwrap().to_string();
+    let (status, body) = do_json(
+        &env.router,
+        "POST",
+        &format!("/api/v1/warehouses/{warehouse_id}/locations"),
+        &token,
+        Some(json!({ "code": "B-02-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let loc2 = body["location"]["id"].as_str().unwrap().to_string();
+    let (status, _) = do_json(
+        &env.router,
+        "POST",
+        &format!("/api/v1/warehouses/{warehouse_id}/locations"),
+        &token,
+        Some(json!({ "code": "A-03-04" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "duplicate location code");
+
+    let post = |path: String, body: Value| {
+        let router = env.router.clone();
+        let token = token.clone();
+        async move { do_json(&router, "POST", &path, &token, Some(body)).await }
+    };
+
+    // Receive 10, then 5.
+    let (status, body) = post(
+        "/api/v1/inventory/receive".to_string(),
+        json!({ "productId": product_id, "warehouseLocationId": loc1, "quantity": 10, "notes": "initial" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["inventory"]["quantityOnHand"], json!(10), "{body}");
+    assert_eq!(
+        body["transaction"]["transactionType"],
+        json!("RECEIPT"),
+        "{body}"
+    );
+    assert_eq!(body["transaction"]["quantityBefore"], json!(0), "{body}");
+    assert_eq!(body["transaction"]["quantityAfter"], json!(10), "{body}");
+
+    let (status, body) = post(
+        "/api/v1/inventory/receive".to_string(),
+        json!({ "productId": product_id, "warehouseLocationId": loc1, "quantity": 5 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["inventory"]["quantityOnHand"], json!(15), "{body}");
+
+    // DAMAGE 2: on hand 15 → 13, damaged 0 → 2.
+    let (status, body) = post(
+        "/api/v1/inventory/adjust".to_string(),
+        json!({ "productId": product_id, "warehouseLocationId": loc1, "transactionType": "DAMAGE", "quantity": 2 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["inventory"]["quantityOnHand"], json!(13), "{body}");
+    assert_eq!(body["inventory"]["quantityDamaged"], json!(2), "{body}");
+    assert_eq!(body["transaction"]["quantity"], json!(-2), "{body}");
+
+    // SALE 3 → 10, RETURN 1 → 11, signed ADJUSTMENT -2 → 9.
+    for (adjust_type, quantity, expected) in
+        [("SALE", 3, 10), ("RETURN", 1, 11), ("ADJUSTMENT", -2, 9)]
+    {
+        let (status, body) = post(
+            "/api/v1/inventory/adjust".to_string(),
+            json!({ "productId": product_id, "warehouseLocationId": loc1, "transactionType": adjust_type, "quantity": quantity }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{adjust_type}: {body}");
+        assert_eq!(
+            body["inventory"]["quantityOnHand"],
+            json!(expected),
+            "{adjust_type}: {body}"
+        );
+    }
+
+    // Transfer 4 to the second bin: 9 → 5 at the source, 4 at the destination.
+    let (status, body) = post(
+        "/api/v1/inventory/transfer".to_string(),
+        json!({ "productId": product_id, "fromWarehouseLocationId": loc1, "toWarehouseLocationId": loc2, "quantity": 4 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["from"]["quantityOnHand"], json!(5), "{body}");
+    assert_eq!(body["to"]["quantityOnHand"], json!(4), "{body}");
+
+    // Guards: overdraft, same-bin transfer, bad type, zero quantity.
+    let (status, body) = post(
+        "/api/v1/inventory/transfer".to_string(),
+        json!({ "productId": product_id, "fromWarehouseLocationId": loc1, "toWarehouseLocationId": loc2, "quantity": 10 }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "overdraft transfer: {body}"
+    );
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Insufficient stock"),
+        "{body}"
+    );
+    let (status, _) = post(
+        "/api/v1/inventory/transfer".to_string(),
+        json!({ "productId": product_id, "fromWarehouseLocationId": loc1, "toWarehouseLocationId": loc1, "quantity": 1 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "same-bin transfer");
+    let (status, _) = post(
+        "/api/v1/inventory/adjust".to_string(),
+        json!({ "productId": product_id, "warehouseLocationId": loc1, "transactionType": "SALE", "quantity": 0 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "zero quantity");
+    let (status, _) = post(
+        "/api/v1/inventory/adjust".to_string(),
+        json!({ "productId": product_id, "warehouseLocationId": loc1, "transactionType": "RECEIPT", "quantity": 1 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "RECEIPT is not adjustable");
+    let (status, _) = post(
+        "/api/v1/inventory/adjust".to_string(),
+        json!({ "productId": product_id, "warehouseLocationId": loc1, "transactionType": "ADJUSTMENT", "quantity": -1000 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "negative overdraft");
+
+    // Audit trail: 8 ledger rows (2 receipts, damage, sale, return, adjustment,
+    // transfer out + in), newest first, with the actor's email. The transfer
+    // pair shares one transaction timestamp, so only their membership is
+    // asserted, not their relative order.
+    let (status, body) = do_json(
+        &env.router,
+        "GET",
+        &format!("/api/v1/inventory/{product_id}/transactions"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let ledger = body["transactions"].as_array().unwrap();
+    assert_eq!(ledger.len(), 8, "{body}");
+    assert!(ledger[0]["createdByEmail"].is_string(), "{body}");
+    let first_two: [&str; 2] = [
+        ledger[0]["transactionType"].as_str().unwrap_or_default(),
+        ledger[1]["transactionType"].as_str().unwrap_or_default(),
+    ];
+    let mut first_two = first_two;
+    first_two.sort_unstable();
+    assert_eq!(first_two, ["TRANSFER_IN", "TRANSFER_OUT"], "{body}");
+    let rest: Vec<&str> = ledger[2..]
+        .iter()
+        .map(|t| t["transactionType"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(
+        rest,
+        [
+            "ADJUSTMENT",
+            "RETURN",
+            "SALE",
+            "DAMAGE",
+            "RECEIPT",
+            "RECEIPT"
+        ],
+        "{body}"
+    );
+
+    // Stock list filtered by product: both bins, paginated shape.
+    let (status, body) = do_json(
+        &env.router,
+        "GET",
+        &format!("/api/v1/inventory?productId={product_id}"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["total"], json!(2), "{body}");
+
+    env.cleanup().await;
+}
+
+#[tokio::test]
+async fn suppliers_flow() {
+    let Some(env) = new_test_env().await else {
+        return;
+    };
+    let token = staff_session(&env).await;
+    set_role(&env, &env.email, "admin").await; // delete is admin-only
+    let run = env.email.split('@').next().unwrap_or("run").to_string();
+
+    // Create → duplicate name → duplicate code.
+    let (status, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/suppliers",
+        &token,
+        Some(json!({
+            "name": format!("Worldpac {run}"),
+            "supplierCode": format!("WP-{run}"),
+            "email": "orders@worldpac.test",
+            "city": "Austin",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let supplier_id = body["supplier"]["id"].as_str().unwrap().to_string();
+    // The default country fills in.
+    assert_eq!(body["supplier"]["country"], json!("USA"), "{body}");
+
+    let (status, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/suppliers",
+        &token,
+        Some(json!({ "name": format!("Worldpac {run}") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "duplicate name: {body}");
+    assert_eq!(body["message"], json!("Supplier already exists"), "{body}");
+
+    let (status, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/suppliers",
+        &token,
+        Some(json!({ "name": format!("Other {run}"), "supplierCode": format!("WP-{run}") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "duplicate code: {body}");
+    assert_eq!(
+        body["message"],
+        json!("Supplier code already in use"),
+        "{body}"
+    );
+
+    // Bad email → 400.
+    let (status, _) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/suppliers",
+        &token,
+        Some(json!({ "name": "x", "email": "not-an-email" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Second supplier for the sourcing fixture.
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/suppliers",
+        &token,
+        Some(json!({ "name": format!("NAPA-{run}") })),
+    )
+    .await;
+    let supplier2 = body["supplier"]["id"].as_str().unwrap().to_string();
+
+    // Catalog fixture: one product.
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/brands",
+        &token,
+        Some(json!({ "name": format!("Moog-{run}") })),
+    )
+    .await;
+    let brand_id = body["brand"]["id"].as_str().unwrap().to_string();
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/categories",
+        &token,
+        Some(json!({ "name": format!("Suspension-{run}") })),
+    )
+    .await;
+    let category_id = body["category"]["id"].as_str().unwrap().to_string();
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/products",
+        &token,
+        Some(json!({
+            "sku": format!("SKU-{run}"), "name": format!("Control Arm {run}"),
+            "brandId": brand_id, "categoryId": category_id,
+        })),
+    )
+    .await;
+    let product_id = body["product"]["id"].as_str().unwrap().to_string();
+
+    // Sourcing: replace with two entries, one preferred.
+    let (status, body) = do_json(
+        &env.router,
+        "PUT",
+        &format!("/api/v1/products/{product_id}/suppliers"),
+        &token,
+        Some(json!({ "sourcing": [
+            { "supplierId": supplier_id, "supplierPartNumber": "WP-99", "cost": "24.50", "minimumOrderQuantity": 2, "leadTimeDays": 3, "preferred": true },
+            { "supplierId": supplier2, "cost": 26.00, "leadTimeDays": 7 }
+        ]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["sourcing"].as_array().unwrap().len(), 2, "{body}");
+    // Preferred vendor sorts first.
+    assert_eq!(
+        body["sourcing"][0]["supplierName"],
+        json!(format!("Worldpac {run}")),
+        "{body}"
+    );
+    // Cost rides as a string; numeric cost also decodes.
+    assert_eq!(body["sourcing"][0]["cost"], json!("24.50"), "{body}");
+    assert_eq!(body["sourcing"][1]["cost"], json!("26.00"), "{body}");
+
+    // GET round-trip.
+    let (status, body) = do_json(
+        &env.router,
+        "GET",
+        &format!("/api/v1/products/{product_id}/suppliers"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["sourcing"].as_array().unwrap().len(), 2, "{body}");
+
+    // Guards: duplicate supplier in payload, unknown supplier, two preferred,
+    // negative cost, MOQ below 1.
+    let put_sourcing = |sourcing: Value| {
+        let router = env.router.clone();
+        let token = token.clone();
+        let path = format!("/api/v1/products/{product_id}/suppliers");
+        async move { do_json(&router, "PUT", &path, &token, Some(sourcing)).await }
+    };
+    let (status, _) = put_sourcing(json!({ "sourcing": [
+        { "supplierId": supplier_id }, { "supplierId": supplier_id }
+    ]}))
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "duplicate supplier");
+    let (status, _) = put_sourcing(json!({ "sourcing": [
+        { "supplierId": "00000000-0000-0000-0000-000000000000" }
+    ]}))
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "unknown supplier");
+    let (status, _) = put_sourcing(json!({ "sourcing": [
+        { "supplierId": supplier_id, "preferred": true },
+        { "supplierId": supplier2, "preferred": true }
+    ]}))
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "two preferred");
+    let (status, _) = put_sourcing(json!({ "sourcing": [
+        { "supplierId": supplier_id, "cost": "-1" }
+    ]}))
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "negative cost");
+    let (status, _) = put_sourcing(json!({ "sourcing": [
+        { "supplierId": supplier_id, "minimumOrderQuantity": 0 }
+    ]}))
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "MOQ 0");
+
+    // Replace down to one entry, then clear entirely.
+    let (status, body) = put_sourcing(json!({ "sourcing": [
+        { "supplierId": supplier2, "supplierPartNumber": "NAPA-1", "preferred": true }
+    ]}))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["sourcing"].as_array().unwrap().len(), 1, "{body}");
+    let (status, body) = put_sourcing(json!({ "sourcing": [] })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["sourcing"].as_array().unwrap().len(), 0, "{body}");
+
+    // Deleting a supplier cascades its sourcing rows away.
+    let (_, body) = do_json(
+        &env.router,
+        "PUT",
+        &format!("/api/v1/products/{product_id}/suppliers"),
+        &token,
+        Some(json!({ "sourcing": [
+            { "supplierId": supplier_id, "cost": "10.00" },
+            { "supplierId": supplier2 }
+        ]})),
+    )
+    .await;
+    let (status, _) = do_json(
+        &env.router,
+        "DELETE",
+        &format!("/api/v1/suppliers/{supplier_id}"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = do_json(
+        &env.router,
+        "GET",
+        &format!("/api/v1/products/{product_id}/suppliers"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let sourcing = body["sourcing"].as_array().unwrap();
+    assert_eq!(sourcing.len(), 1, "{body}");
+    assert_eq!(sourcing[0]["supplierId"], json!(supplier2), "{body}");
+
+    env.cleanup().await;
+}
+
+#[tokio::test]
+async fn search_and_outbox_flow() {
+    let Some(env) = new_test_env().await else {
+        return;
+    };
+    let token = staff_session(&env).await;
+    set_role(&env, &env.email, "admin").await; // reindex is admin-only
+    let run = env.email.split('@').next().unwrap_or("run").to_string();
+
+    // Catalog fixture.
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/brands",
+        &token,
+        Some(json!({ "name": format!("Bosch-{run}") })),
+    )
+    .await;
+    let brand_id = body["brand"]["id"].as_str().unwrap().to_string();
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/categories",
+        &token,
+        Some(json!({ "name": format!("Brakes-{run}") })),
+    )
+    .await;
+    let category_id = body["category"]["id"].as_str().unwrap().to_string();
+    let sku = format!("SKU-{run}");
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/products",
+        &token,
+        Some(json!({
+            "sku": sku, "partNumber": format!("BP-{run}"),
+            "name": format!("QuietCast Pads {run}"),
+            "brandId": brand_id, "categoryId": category_id,
+        })),
+    )
+    .await;
+    let product_id = body["product"]["id"].as_str().unwrap().to_string();
+
+    // The outbox recorded the create in the same transaction (filtered to this
+    // product — other tests write outbox events concurrently).
+    let events: Vec<(String,)> = sqlx::query_as(
+        "SELECT event_type FROM outbox_events WHERE aggregate_id = $1 ORDER BY created_at",
+    )
+    .bind(sqlx::types::Uuid::parse_str(&product_id).unwrap())
+    .fetch_all(&env.pool)
+    .await
+    .expect("outbox rows");
+    assert_eq!(
+        events,
+        vec![("product.created".to_string(),)],
+        "outbox after create"
+    );
+
+    // An update adds an event; delete adds the deletion event.
+    do_json(
+        &env.router,
+        "PUT",
+        &format!("/api/v1/products/{product_id}"),
+        &token,
+        Some(json!({
+            "sku": sku, "name": format!("QuietCast Pads {run} II"),
+            "brandId": brand_id, "categoryId": category_id,
+        })),
+    )
+    .await;
+    do_json(
+        &env.router,
+        "DELETE",
+        &format!("/api/v1/products/{product_id}"),
+        &token,
+        None,
+    )
+    .await;
+    let events: Vec<(String,)> = sqlx::query_as(
+        "SELECT event_type FROM outbox_events WHERE aggregate_id = $1 ORDER BY created_at",
+    )
+    .bind(sqlx::types::Uuid::parse_str(&product_id).unwrap())
+    .fetch_all(&env.pool)
+    .await
+    .expect("outbox rows");
+    assert_eq!(
+        events,
+        vec![
+            ("product.created".to_string(),),
+            ("product.updated".to_string(),),
+            ("product.deleted".to_string(),),
+        ],
+        "outbox after update + delete"
+    );
+
+    // Search without Elasticsearch configured: falls back to Postgres and says
+    // so. (A fresh product was created above after the delete.)
+    let (_, body) = do_json(
+        &env.router,
+        "POST",
+        "/api/v1/products",
+        &token,
+        Some(json!({
+            "sku": format!("SKU2-{run}"), "name": format!("QuietCast Pads {run} III"),
+            "brandId": brand_id, "categoryId": category_id,
+        })),
+    )
+    .await;
+    assert_eq!(body["product"]["id"].is_string(), true, "{body}");
+    let (status, body) = do_json(
+        &env.router,
+        "GET",
+        &format!("/api/v1/search?q=SKU2-{run}"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["source"], json!("postgres"), "{body}");
+    assert!(
+        body["products"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["sku"] == format!("SKU2-{run}")),
+        "{body}"
+    );
+
+    // Reindex without Elasticsearch → clean refusal (admin-only route, but the
+    // config check comes after the role check).
+    let (status, _) = do_json(&env.router, "POST", "/api/v1/search/reindex", &token, None).await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "no elasticsearch configured"
+    );
 
     env.cleanup().await;
 }

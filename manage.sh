@@ -12,6 +12,8 @@ GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'; NC='\033[0m'
 
 PORT_BACKEND=8080
 PORT_FRONTEND=3000
+PORT_DB=5432
+PORT_SEARCH=9200
 
 # Seconds to wait for each service's port. Cargo may need to compile before
 # the backend's port opens (cold target/), so it gets a generous window;
@@ -28,7 +30,7 @@ LOG_BASE=/tmp/rust-template
 # precedence the backend's env loader applies. Used by the Postgres check,
 # database reset, and re-seed commands.
 load_db_url() {
-  local url="postgres://postgres:postgres@localhost:5432/rust_template?sslmode=disable"
+  local url="postgres://postgres:postgres@localhost:5432/inventory?sslmode=disable"
   if [ -f "$ROOT_DIR/.env" ]; then
     url=$(grep -E '^DATABASE_URL=' "$ROOT_DIR/.env" | tail -1 | cut -d= -f2- | tr -d '"' || true)
   fi
@@ -77,13 +79,69 @@ start_backend() {
   # immediately anyway).
   if command -v pg_isready >/dev/null 2>&1 && ! pg_isready -q -d "$url"; then
     echo -e "${RED}PostgreSQL is not running (checked $url).${NC}"
-    echo "Start it first, e.g. brew services start postgresql@16"
+    echo "Start it first: menu option 12 (Docker), or e.g. brew services start postgresql@16"
     return 1
   fi
   if ! start_service "Backend" backend "$PORT_BACKEND" "$BACKEND_START_TRIES" cargo run; then
     echo "→ see $LOG_BASE-backend.log"
     return 1
   fi
+}
+
+# Step 1: the database lives in Docker (docker-compose.yml). The container
+# stays up across Stop All — data persists in the named volume.
+start_database() {
+  if ! command -v docker >/dev/null 2>&1; then
+    echo -e "${RED}docker not found — install Docker Desktop or use a local PostgreSQL.${NC}"
+    return 1
+  fi
+  if lsof -nP -iTCP:"$PORT_DB" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo -e "${YELLOW}Something already listens on :$PORT_DB (PostgreSQL is up)${NC}"
+    return 0
+  fi
+  (cd "$ROOT_DIR" && docker compose up -d db) || return 1
+  wait_for_port "$PORT_DB" "PostgreSQL (docker)" 30 || return 1
+  echo -e "${GREEN}PostgreSQL is up on :$PORT_DB${NC}"
+}
+
+# Step 5: Elasticsearch (docker-compose.yml). Optional — the API falls back
+# to Postgres search when it's down.
+start_elasticsearch() {
+  if ! command -v docker >/dev/null 2>&1; then
+    echo -e "${RED}docker not found — install Docker Desktop first.${NC}"
+    return 1
+  fi
+  if lsof -nP -iTCP:"$PORT_SEARCH" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo -e "${YELLOW}Something already listens on :$PORT_SEARCH (Elasticsearch is up)${NC}"
+    return 0
+  fi
+  (cd "$ROOT_DIR" && docker compose up -d elasticsearch) || return 1
+  echo "Waiting for Elasticsearch (can take ~30s on first start)..."
+  for i in $(seq 1 60); do
+    curl -s -o /dev/null "http://localhost:$PORT_SEARCH" && break
+    sleep 1
+  done
+  if curl -s -o /dev/null "http://localhost:$PORT_SEARCH"; then
+    echo -e "${GREEN}Elasticsearch is up on :$PORT_SEARCH${NC}"
+  else
+    echo -e "${RED}Elasticsearch did not come up — see: docker compose logs elasticsearch${NC}"
+    return 1
+  fi
+}
+
+# Full containerized stack (docker compose --profile app): builds and runs the
+# backend + frontend containers. First build takes a while (Rust release
+# compile). Stop with: docker compose --profile app down
+start_full_stack() {
+  if ! command -v docker >/dev/null 2>&1; then
+    echo -e "${RED}docker not found — install Docker Desktop first.${NC}"
+    return 1
+  fi
+  (cd "$ROOT_DIR" && docker compose up -d db elasticsearch) || return 1
+  echo "Building and starting backend + frontend containers..."
+  (cd "$ROOT_DIR" && docker compose --profile app up -d --build) || return 1
+  echo -e "${GREEN}Full stack: http://localhost:3000 (API on :8080)${NC}"
+  echo "Logs: docker compose logs -f backend frontend"
 }
 
 stop_service() {
@@ -121,6 +179,11 @@ stop_all() {
 }
 
 show_status() {
+  if lsof -nP -iTCP:"$PORT_DB" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo -e "  Database : ${GREEN}running${NC} on :$PORT_DB"
+  else
+    echo -e "  Database : ${RED}not running${NC}"
+  fi
   if lsof -nP -iTCP:"$PORT_BACKEND" -sTCP:LISTEN >/dev/null 2>&1; then
     echo -e "  Backend : ${GREEN}running${NC} on :$PORT_BACKEND"
   else
@@ -217,6 +280,9 @@ while true; do
   echo " 9) Reset Database (destructive)"
   echo " 10) View Logs (tail)"
   echo " 11) Re-seed (reset DB + restart backend)"
+  echo " 12) Start Database (Docker)"
+  echo " 13) Start Elasticsearch (Docker)"
+  echo " 14) Start Full Stack in Docker (backend + frontend)"
   echo " q) Quit"
   read -r -p "Choose: " choice
   case "$choice" in
@@ -234,6 +300,9 @@ while true; do
     9) reset_database ;;
     10) view_logs ;;
     11) re_seed ;;
+    12) start_database ;;
+    13) start_elasticsearch ;;
+    14) start_full_stack ;;
     q) break ;;
     *) echo -e "${YELLOW}Unknown option${NC}" ;;
   esac

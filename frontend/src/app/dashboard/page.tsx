@@ -13,6 +13,7 @@ import {
 import { API_BASE, callApi, renewSessionFrom } from "@/lib/api";
 import { ROLES, hasRole } from "@/lib/roles";
 import { PageHeader } from "@/components/PageHeader";
+import { SystemStatus } from "@/components/SystemStatus";
 import { PageFooter } from "@/components/PageFooter";
 import { PageTitle } from "@/components/PageTitle";
 
@@ -302,6 +303,15 @@ export default function DashboardPage() {
           Logout
         </a>
       </PageHeader>
+
+      <SystemStatus />
+
+      <nav className="dashboard-nav">
+        <a href="/products">Products</a>
+        <a href="/inventory">Inventory</a>
+        <a href="/suppliers">Suppliers</a>
+        <a href="/search">Search</a>
+      </nav>
 
       <div className="dashboard-card">
         {isStaff && (

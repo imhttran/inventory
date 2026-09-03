@@ -2,6 +2,10 @@
 // format so existing hashes verify unchanged), HS256 JWTs, and the auth
 // endpoints.
 
+pub mod profile;
+pub mod roles;
+pub mod users;
+
 use axum::body::Bytes;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
@@ -14,7 +18,7 @@ use serde::Deserialize;
 use serde_json::json;
 use subtle::ConstantTimeEq;
 
-use crate::mail;
+use crate::events::mail;
 use crate::queue::{self, QueueError};
 use crate::routes::{decode, fail, msg, respond, respond_500};
 use crate::state::AppState;
@@ -283,10 +287,7 @@ pub async fn signup(State(state): State<AppState>, body: Bytes) -> Response {
 pub async fn verify(State(state): State<AppState>, Query(query): Query<VerifyQuery>) -> Response {
     let token = query.token.unwrap_or_default();
     if token.is_empty() {
-        return respond(
-            StatusCode::BAD_REQUEST,
-            fail("Missing verification token"),
-        );
+        return respond(StatusCode::BAD_REQUEST, fail("Missing verification token"));
     }
     let id: Option<i32> =
         match sqlx::query_scalar("SELECT id FROM users WHERE verification_token = $1")
@@ -435,18 +436,10 @@ pub async fn login(State(state): State<AppState>, body: Bytes) -> Response {
     let (id, stored_hash, verified) = match row {
         Ok(Some(row)) => row,
         // Bad credentials and lookup failures read the same (mirrors err != nil || !verify).
-        _ => {
-            return respond(
-                StatusCode::UNAUTHORIZED,
-                fail("Invalid email or password"),
-            )
-        }
+        _ => return respond(StatusCode::UNAUTHORIZED, fail("Invalid email or password")),
     };
     if !verify_password(&body.password, &stored_hash) {
-        return respond(
-            StatusCode::UNAUTHORIZED,
-            fail("Invalid email or password"),
-        );
+        return respond(StatusCode::UNAUTHORIZED, fail("Invalid email or password"));
     }
     if state.cfg.email_verification_required && !verified {
         return respond(
@@ -518,30 +511,21 @@ pub async fn verify_login(State(state): State<AppState>, body: Bytes) -> Respons
     let (user_id, code, expires_at, used, attempts, email) = match row {
         Ok(Some(row)) => row,
         Ok(None) => {
-            return respond(
-                StatusCode::BAD_REQUEST,
-                fail("Invalid or expired code"),
-            );
+            return respond(StatusCode::BAD_REQUEST, fail("Invalid or expired code"));
         }
         Err(err) => return respond_500("Verify Login Error", err, false),
     };
     // Lock the code after a handful of failed tries so a 4-digit code can't be
     // brute-forced within its 10-minute window.
     if used || Utc::now() > expires_at || attempts >= 5 {
-        return respond(
-            StatusCode::BAD_REQUEST,
-            fail("Invalid or expired code"),
-        );
+        return respond(StatusCode::BAD_REQUEST, fail("Invalid or expired code"));
     }
     if !bool::from(code.as_bytes().ct_eq(body.code.as_bytes())) {
         let _ = sqlx::query("UPDATE login_codes SET attempts = attempts + 1 WHERE token = $1")
             .bind(&body.token)
             .execute(&state.db)
             .await;
-        return respond(
-            StatusCode::BAD_REQUEST,
-            fail("Invalid or expired code"),
-        );
+        return respond(StatusCode::BAD_REQUEST, fail("Invalid or expired code"));
     }
     if let Err(err) = sqlx::query("UPDATE login_codes SET used = true WHERE token = $1")
         .bind(&body.token)
@@ -584,18 +568,12 @@ pub async fn resend_login_code(State(state): State<AppState>, body: Bytes) -> Re
     let (resends, expires_at, used, email) = match row {
         Ok(Some(row)) => row,
         Ok(None) => {
-            return respond(
-                StatusCode::BAD_REQUEST,
-                fail("Invalid or expired code"),
-            );
+            return respond(StatusCode::BAD_REQUEST, fail("Invalid or expired code"));
         }
         Err(err) => return respond_500("Resend Code Error", err, false),
     };
     if used || Utc::now() > expires_at {
-        return respond(
-            StatusCode::BAD_REQUEST,
-            fail("Invalid or expired code"),
-        );
+        return respond(StatusCode::BAD_REQUEST, fail("Invalid or expired code"));
     }
     if resends >= 3 {
         return respond(

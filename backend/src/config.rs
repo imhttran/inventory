@@ -9,7 +9,7 @@ use std::path::Path;
 // Default DSN for local development, used when DATABASE_URL is unset (both by
 // the server and the set-role subcommand).
 pub const DEFAULT_DATABASE_URL: &str =
-    "postgres://postgres:postgres@localhost:5432/rust_template?sslmode=disable";
+    "postgres://postgres:postgres@localhost:5432/inventory?sslmode=disable";
 
 pub struct Config {
     pub port: u16,
@@ -26,6 +26,11 @@ pub struct Config {
     pub max_attempts: i32,
     pub email_verification_required: bool,
     pub jwt_secret: String,
+
+    // Search pipeline: empty url disables Elasticsearch (queries fall back to
+    // Postgres ILIKE).
+    pub elasticsearch_url: String,
+    pub search_index: String,
 }
 
 impl Config {
@@ -59,6 +64,8 @@ impl Config {
                 Ok(v) if v == "false"
             ),
             jwt_secret,
+            elasticsearch_url: env_or("ELASTICSEARCH_URL", "http://localhost:9200"),
+            search_index: env_or("SEARCH_INDEX", "products"),
         }
     }
 }

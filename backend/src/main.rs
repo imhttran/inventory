@@ -20,6 +20,36 @@ async fn main() {
         return;
     }
 
+    // seed subcommand: apply migrations + dev seed data, then exit. Runs in
+    // the compose `seed` service (profiles: ["seed"]); also usable locally as
+    // `cargo run -- seed`. Unlike set-role, this follows the server's env-file
+    // precedence so it targets the same database the server would. The seeds
+    // are gated on NODE_ENV=development inside seed.rs — the explicit check
+    // here just makes the no-op visible.
+    if args.first().map(String::as_str) == Some("seed") {
+        backend::config::load_env_files();
+        let cfg = Config::load();
+        if cfg.env != "development" {
+            eprintln!(
+                "seed skipped: NODE_ENV={} — demo seed data only applies in development",
+                cfg.env
+            );
+            return;
+        }
+        let db = sqlx::PgPool::connect(&cfg.database_url)
+            .await
+            .unwrap_or_else(|err| backend::fatal("Failed to connect to database", err));
+        backend::migrate(&db).await;
+        backend::seed::run(&cfg, &db).await;
+        let products: i64 = sqlx::query_scalar("SELECT count(*) FROM products")
+            .fetch_one(&db)
+            .await
+            .unwrap_or(0);
+        println!("[seed] done — {products} products in catalog");
+        println!("[seed] note: demo data only fills an empty catalog; wipe it (or make nuke) to re-seed from scratch");
+        return;
+    }
+
     backend::config::load_env_files();
     let cfg = Config::load();
 
@@ -28,7 +58,7 @@ async fn main() {
         .unwrap_or_else(|err| backend::fatal("Failed to connect to database", err));
 
     backend::migrate(&db).await;
-    backend::seed_dev_admin(&cfg, &db).await;
+    backend::seed::run(&cfg, &db).await;
 
     let port = cfg.port;
     let state = AppState {
@@ -38,6 +68,9 @@ async fn main() {
 
     // Email worker: polls the queue and sends (or logs) every 3s.
     tokio::spawn(queue::start_email_worker(state.clone()));
+
+    // Search worker: drains outbox_events into Elasticsearch every 2s.
+    tokio::spawn(backend::search::run_worker(state.clone()));
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await

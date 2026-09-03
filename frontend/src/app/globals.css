@@ -342,6 +342,145 @@ body {
     font-weight: 600;
 }
 
+/* Step 1: backend/database health strip on the dashboard, fed by /api/health. */
+.system-status {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 24px;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 14px 24px;
+    box-shadow: var(--card-shadow);
+}
+
+.system-status h2 {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.status-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.status-label {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+.status-pill {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 2px 10px;
+    border-radius: 999px;
+}
+
+.status-ok {
+    color: #14704a;
+    background: #e2f4ea;
+}
+
+.status-error {
+    color: var(--danger-color);
+    background: #fbe9e7;
+}
+
+.status-unknown {
+    color: var(--text-muted);
+    background: var(--raised-color);
+}
+
+/* Dashboard quick nav into the auto-parts sections. */
+.dashboard-nav {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.dashboard-nav a {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.dashboard-nav a:hover {
+    color: var(--primary-hover);
+    text-decoration: underline;
+}
+
+/* Products catalog: filter row + pagination meta under the table. */
+.product-filters {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.product-filters input,
+.product-filters select {
+    flex: 1 1 180px;
+    max-width: 280px;
+}
+
+.product-meta {
+    margin: 16px 0 0;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+/* Product sourcing editor: one row per supplier. */
+.sourcing-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    width: 100%;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.sourcing-row:last-of-type {
+    border-bottom: none;
+}
+
+.sourcing-row input,
+.sourcing-row select {
+    flex: 1 1 110px;
+}
+
+.sourcing-preferred {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* Search page: shows which engine served the query. */
+.search-source {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--raised-color);
+    border-radius: 999px;
+    padding: 2px 10px;
+    white-space: nowrap;
+}
+
 .user-list-section {
     margin-top: 2rem;
     text-align: left;

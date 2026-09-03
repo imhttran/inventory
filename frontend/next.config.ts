@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   // This repo tree contains other package-lock.json files; keep file tracing
   // rooted at the frontend directory instead of letting Next infer one.
   outputFileTracingRoot: path.join(import.meta.dirname),
+  // Slim Docker image: .next/standalone ships its own server.js. No effect on
+  // `npm run dev`.
+  output: "standalone",
   // All browser traffic targets this server only: /api/* is proxied server-side
   // to the Rust API (API_URL, default http://localhost:8080). The Rust API is
   // therefore never exposed to the browser directly — same-origin fetches, no CORS.

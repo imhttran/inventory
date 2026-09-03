@@ -1,14 +1,16 @@
 // Port of queue.go — the DB-backed queue enqueue helpers. The polling worker
 // lands with the mailer in Phase 5.
 
+pub mod mail;
+
 use std::fmt;
 use std::time::Duration;
 
 use chrono::Duration as ChronoDuration;
 use sqlx::PgPool;
 
+use self::mail::token_link;
 use crate::auth::random_token;
-use crate::mail::{self, token_link};
 use crate::state::AppState;
 
 // Prisma's P2025 (record not found in an update) as a sentinel.

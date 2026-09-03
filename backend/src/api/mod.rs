@@ -1,5 +1,7 @@
 // Port of app.go's router, response helpers, and auth middleware.
 
+pub mod health;
+
 use axum::body::Bytes;
 use axum::extract::{FromRequestParts, Request, State};
 use axum::http::request::Parts;
@@ -12,9 +14,15 @@ use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 use crate::auth;
+use crate::brands;
+use crate::categories;
+use crate::inventory;
+use crate::products;
 use crate::profile;
 use crate::roles::has_role;
+use crate::search;
 use crate::state::AppState;
+use crate::suppliers;
 use crate::users;
 
 // Route-for-route mirror of newRouter() in app.go. No CORS middleware:
@@ -22,6 +30,62 @@ use crate::users;
 // (see frontend/next.config.ts) — same-origin.
 pub fn new_router(state: AppState) -> Router {
     Router::new()
+        .route("/api/health", get(health::health))
+        // ---- Step 2: catalog (v1) ----
+        .route(
+            "/api/v1/brands",
+            get(brands::list_brands).post(brands::create_brand),
+        )
+        .route(
+            "/api/v1/categories",
+            get(categories::list_categories).post(categories::create_category),
+        )
+        .route(
+            "/api/v1/products",
+            get(products::list_products).post(products::create_product),
+        )
+        .route(
+            "/api/v1/products/{id}",
+            get(products::get_product)
+                .put(products::update_product)
+                .delete(products::delete_product),
+        )
+        // ---- Step 3: inventory ----
+        .route(
+            "/api/v1/warehouses",
+            get(inventory::warehouses::list_warehouses)
+                .post(inventory::warehouses::create_warehouse),
+        )
+        .route(
+            "/api/v1/warehouses/{id}/locations",
+            get(inventory::warehouses::list_locations).post(inventory::warehouses::create_location),
+        )
+        .route("/api/v1/inventory", get(inventory::list_inventory))
+        .route("/api/v1/inventory/receive", post(inventory::receive))
+        .route("/api/v1/inventory/adjust", post(inventory::adjust))
+        .route("/api/v1/inventory/transfer", post(inventory::transfer))
+        .route(
+            "/api/v1/inventory/{product_id}/transactions",
+            get(inventory::list_transactions),
+        )
+        // ---- Step 4: suppliers + product sourcing ----
+        .route(
+            "/api/v1/suppliers",
+            get(suppliers::list_suppliers).post(suppliers::create_supplier),
+        )
+        .route(
+            "/api/v1/suppliers/{id}",
+            get(suppliers::get_supplier)
+                .put(suppliers::update_supplier)
+                .delete(suppliers::delete_supplier),
+        )
+        .route(
+            "/api/v1/products/{id}/suppliers",
+            get(suppliers::list_product_sourcing).put(suppliers::replace_product_sourcing),
+        )
+        // ---- Step 5: search ----
+        .route("/api/v1/search", get(search::search))
+        .route("/api/v1/search/reindex", post(search::reindex))
         .route("/api/signup", post(auth::signup))
         .route("/api/verify", get(auth::verify))
         .route("/api/resend-verification", post(auth::resend_verification))
@@ -128,6 +192,13 @@ pub fn decode<T: DeserializeOwned + Default>(body: &Bytes) -> T {
 pub fn is_unique_violation(err: &sqlx::Error) -> bool {
     err.as_database_error()
         .is_some_and(|e| e.code().is_some_and(|c| c == "23505"))
+}
+
+// Postgres CHECK violation (e.g. non-negative stock levels) — surfaced as a
+// 400 instead of a 500; the code-side checks give the precise message first.
+pub fn is_check_violation(err: &sqlx::Error) -> bool {
+    err.as_database_error()
+        .is_some_and(|e| e.code().is_some_and(|c| c == "23514"))
 }
 
 // ---- auth ----

@@ -1,0 +1,120 @@
+# Step 1: PostgreSQL as the source of truth, in Docker.
+# Credentials match DEFAULT_DATABASE_URL in backend/src/config.rs:
+#   postgres://postgres:postgres@localhost:5432/inventory?sslmode=disable
+#
+#   docker compose up -d      # start
+#   docker compose down       # stop (data survives in the named volume)
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: auto-parts-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: inventory
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d inventory"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Search engine for the outbox worker. Security disabled for local dev only.
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    container_name: auto-parts-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # Catch-all SMTP sink for development: the backend's email-queue worker
+  # delivers here and every message (verification, 2FA, password reset) is
+  # viewable in the web UI at http://localhost:8025. Native dev with SMTP_HOST
+  # unset keeps the log transport — no mail server needed.
+  mailpit:
+    image: axllent/mailpit:v1.23
+    container_name: auto-parts-mailpit
+    ports:
+      - "1025:1025"   # SMTP (backend: SMTP_HOST=mailpit, SMTP_PORT=1025)
+      - "8025:8025"   # inbox web UI
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8025/ >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot dev seeder: applies migrations + demo catalog, then exits. The
+  # backend container already seeds itself on boot in development — run this
+  # to seed on demand against the db service:
+  #   docker compose --profile seed run --rm seed   (or: make seed)
+  seed:
+    build: ./backend
+    container_name: auto-parts-seed
+    profiles: ["seed"]
+    command: ["seed"]
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/inventory?sslmode=disable
+      NODE_ENV: development
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ---- application containers (opt-in) ----
+  # Started with: docker compose --profile app up -d --build
+  # For native development you only need the infra above (db + elasticsearch);
+  # run the backend/frontend with ./manage.sh as usual.
+  backend:
+    build: ./backend
+    container_name: auto-parts-backend
+    profiles: ["app"]
+    environment:
+      # In-network hostnames, not localhost — the containers talk to each other.
+      DATABASE_URL: postgres://postgres:postgres@db:5432/inventory?sslmode=disable
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      # Dev mail sink: emails land in Mailpit (inbox UI at http://localhost:8025).
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      # development: seeds the dev admin (admin@mail.com / Password1234!) and
+      # uses the 1234 2FA code. For a real deployment use NODE_ENV=production
+      # and a strong JWT_SECRET — the backend refuses to boot in production
+      # without one.
+      NODE_ENV: development
+      JWT_SECRET: dev-insecure-jwt-secret
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: auto-parts-frontend
+    profiles: ["app"]
+    environment:
+      # The Next.js server proxies /api/* here (see next.config.ts). Baked into
+      # the standalone build by the Dockerfile.
+      API_URL: http://backend:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  esdata:
