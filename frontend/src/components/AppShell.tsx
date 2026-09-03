@@ -2,15 +2,25 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
+import { API_BASE, callApi } from "@/lib/api";
+import { hasRole, type Role } from "@/lib/roles";
 import { Logo } from "./Logo";
 
 const COLLAPSE_KEY = "sidebar-collapsed";
 
 // Persistent operations nav. Auth pages (login, profile, password flows)
-// keep the centered-card layout and don't use this shell.
-const NAV_SECTIONS: { label: string; items: { href: string; label: string; icon: ReactNode }[] }[] = [
+// keep the centered-card layout and don't use this shell. A section with
+// minRole is hidden from users below that role — the backend rejects their
+// writes there anyway (counter sales are staff-only), so clients just get
+// a link to a page that tells them no.
+const NAV_SECTIONS: {
+  label: string;
+  minRole?: Role;
+  items: { href: string; label: string; icon: ReactNode }[];
+}[] = [
   {
     label: "Counter",
+    minRole: "staff",
     items: [
       {
         href: "/sale",
@@ -89,11 +99,32 @@ export function AppShell({ children }: { children: ReactNode }) {
     pathname === href || pathname.startsWith(`${href}/`);
 
   const [collapsed, setCollapsed] = useState(false);
+  // Role gate for minRole nav sections. Null until /api/me answers — sections
+  // stay hidden while unknown, matching how pages treat isStaff before me loads.
+  const [role, setRole] = useState<string | null>(null);
 
   // Read the saved preference after mount so server and first client render
   // match (avoids a hydration mismatch from reading localStorage eagerly).
   useEffect(() => {
     setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1");
+  }, []);
+
+  // Same auth-on-mount call the pages make, used only to filter the nav.
+  // On failure role stays null and gated sections stay hidden (the page
+  // content redirects to login on its own failed auth check).
+  useEffect(() => {
+    (async () => {
+      const stored = localStorage.getItem("auth_token");
+      if (!stored) return;
+      const result = await callApi<{ user: { role: string } }>(
+        stored,
+        "/api/me",
+        "GET",
+        undefined,
+        false,
+      );
+      if (result) setRole(result.user.role);
+    })();
   }, []);
 
   const toggleCollapsed = () => {
@@ -125,21 +156,29 @@ export function AppShell({ children }: { children: ReactNode }) {
           </svg>
           <span>Collapse</span>
         </button>
-        {NAV_SECTIONS.map((section) => (
-          <div key={section.label}>
-            <div className="side-nav-label">{section.label}</div>
-            {section.items.map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                className={`side-link ${isActive(item.href) ? "active" : ""}`}
-              >
-                {item.icon}
-                <span>{item.label}</span>
-              </a>
-            ))}
-          </div>
-        ))}
+        {NAV_SECTIONS.map((section) => {
+          if (
+            section.minRole &&
+            (role === null || !hasRole(role, section.minRole))
+          ) {
+            return null;
+          }
+          return (
+            <div key={section.label}>
+              <div className="side-nav-label">{section.label}</div>
+              {section.items.map((item) => (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  className={`side-link ${isActive(item.href) ? "active" : ""}`}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </a>
+              ))}
+            </div>
+          );
+        })}
         <div className="side-foot">AUS · Austin Main</div>
       </aside>
       <div className="app-main">{children}</div>

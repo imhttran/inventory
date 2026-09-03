@@ -88,10 +88,10 @@ services:
       # Dev mail sink: emails land in Mailpit (inbox UI at http://localhost:8025).
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
-      # development: seeds the dev admin (admin@mail.com / Password1234!) and
-      # uses the 1234 2FA code. For a real deployment use NODE_ENV=production
-      # and a strong JWT_SECRET — the backend refuses to boot in production
-      # without one.
+      # development: seeds the dev logins (admin/staff/user@mail.com, all
+      # Password1234!) and uses the 1234 2FA code. For a real deployment use
+      # NODE_ENV=production and a strong JWT_SECRET — the backend refuses to
+      # boot in production without one.
       NODE_ENV: development
       JWT_SECRET: dev-insecure-jwt-secret
     ports:

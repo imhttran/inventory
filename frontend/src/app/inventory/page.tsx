@@ -484,46 +484,32 @@ export default function InventoryPage() {
     const authToken = localStorage.getItem("auth_token");
     if (!authToken) return;
     try {
-      const [
-        stockRes,
-        recentRes,
-        productsRes,
-        warehousesRes,
-        locationsRes,
-        historyRes,
-      ] = await Promise.all([
-        fetch(
-          `${API_BASE}/api/v1/inventory?page=1&perPage=${STOCK_PAGE}` +
-            (warehouseFilter ? `&warehouseId=${warehouseFilter}` : ""),
-          { headers: { Authorization: `Bearer ${authToken}` } },
-        ),
-        fetch(
-          `${API_BASE}/api/v1/inventory/transactions/recent?limit=${RECENT_LIMIT}`,
-          {
+      const [stockRes, recentRes, productsRes, warehousesRes, historyRes] =
+        await Promise.all([
+          fetch(
+            `${API_BASE}/api/v1/inventory?page=1&perPage=${STOCK_PAGE}` +
+              (warehouseFilter ? `&warehouseId=${warehouseFilter}` : ""),
+            { headers: { Authorization: `Bearer ${authToken}` } },
+          ),
+          fetch(
+            `${API_BASE}/api/v1/inventory/transactions/recent?limit=${RECENT_LIMIT}`,
+            {
+              headers: { Authorization: `Bearer ${authToken}` },
+            },
+          ),
+          fetch(`${API_BASE}/api/v1/products?perPage=${STOCK_PAGE}`, {
             headers: { Authorization: `Bearer ${authToken}` },
-          },
-        ),
-        fetch(`${API_BASE}/api/v1/products?perPage=${STOCK_PAGE}`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        }),
-        fetch(`${API_BASE}/api/v1/warehouses`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        }),
-        fetch(`${API_BASE}/api/v1/warehouses/locations`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        }),
-        fetch(`${API_BASE}/api/v1/inventory/history?days=14`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        }),
-      ]);
-      [
-        stockRes,
-        recentRes,
-        productsRes,
-        warehousesRes,
-        locationsRes,
-        historyRes,
-      ].forEach(renewSessionFrom);
+          }),
+          fetch(`${API_BASE}/api/v1/warehouses`, {
+            headers: { Authorization: `Bearer ${authToken}` },
+          }),
+          fetch(`${API_BASE}/api/v1/inventory/history?days=14`, {
+            headers: { Authorization: `Bearer ${authToken}` },
+          }),
+        ]);
+      [stockRes, recentRes, productsRes, warehousesRes, historyRes].forEach(
+        renewSessionFrom,
+      );
       if (!stockRes.ok) throw new Error("stock");
       const stockData = await stockRes.json();
       setStock(stockData.inventory ?? []);
@@ -540,8 +526,23 @@ export default function InventoryPage() {
       const warehousesData = await warehousesRes.json().catch(() => ({}));
       setWarehouses(warehousesData.warehouses ?? []);
 
-      const locationsData = await locationsRes.json().catch(() => ({}));
-      const locations: WarehouseLocation[] = locationsData.locations ?? [];
+      // The API serves locations per warehouse only (there is no
+      // all-locations route), so fan out one GET per warehouse and merge.
+      const locationLists = await Promise.all(
+        (warehousesData.warehouses ?? []).map((warehouse: Warehouse) =>
+          fetch(`${API_BASE}/api/v1/warehouses/${warehouse.id}/locations`, {
+            headers: { Authorization: `Bearer ${authToken}` },
+          })
+            .then((response) => {
+              renewSessionFrom(response);
+              return response.ok ? response.json() : { locations: [] };
+            })
+            .catch(() => ({ locations: [] })),
+        ),
+      );
+      const locations: WarehouseLocation[] = locationLists.flatMap(
+        (data: { locations?: WarehouseLocation[] }) => data.locations ?? [],
+      );
       const nextGroups: WarehouseGroup[] = [];
       for (const warehouse of warehousesData.warehouses ?? []) {
         nextGroups.push({

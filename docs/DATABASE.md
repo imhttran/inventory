@@ -76,9 +76,10 @@ Tables:
 Enum types: `product_identifier_type`, `cross_reference_type`,
 `inventory_transaction_type`. Catalog tables carry a `set_updated_at` trigger.
 
-Dev seed (in `backend/src/lib.rs`, only when `NODE_ENV=development`): upserts
-`admin@mail.com` / `Password1234!` plus their profile, so the dev admin isn't
-blocked by onboarding gates.
+Dev logins (seeded in `backend/src/seed.rs`, only when `NODE_ENV=development`):
+one per role — **admin@mail.com**, **staff@mail.com**, **user@mail.com**, all
+`Password1234!` — plus their profiles, so no dev login is blocked by onboarding
+gates.
 
 ## Day-to-day operations
 

@@ -10,64 +10,77 @@ use sqlx::PgPool;
 use crate::config::Config;
 use crate::search;
 
-const DEV_ADMIN_EMAIL: &str = "admin@mail.com";
-const DEV_ADMIN_PASSWORD: &str = "Password1234!";
+const DEV_PASSWORD: &str = "Password1234!";
 
-// Dev-only convenience: guarantees a known admin login exists locally, so
-// there's no manual set-role step for local dev. Gated on NODE_ENV so these
+// One login per role (email, role, profile first/last name) so RBAC can be
+// exercised locally without hand-editing the database.
+const DEV_USERS: [(&str, &str, &str, &str); 3] = [
+    ("admin@mail.com", "admin", "Dev", "Admin"),
+    ("staff@mail.com", "staff", "Dev", "Staff"),
+    ("user@mail.com", "client", "Dev", "User"),
+];
+
+// Dev-only convenience: guarantees known logins exist locally (one per role),
+// so there's no manual set-role step for local dev. Gated on NODE_ENV so these
 // credentials can never appear in a qa/prod database.
-pub async fn seed_dev_admin(cfg: &Config, db: &PgPool) {
+pub async fn seed_dev_users(cfg: &Config, db: &PgPool) {
     if cfg.env != "development" {
         return;
     }
-    let hashed = crate::auth::hash_password(DEV_ADMIN_PASSWORD);
-    // Conflict (no row) and DB errors both fall through to the lookup, like
-    // Go's err != nil branch.
-    let inserted: Option<i32> = sqlx::query_scalar(
-        "INSERT INTO users (email, password, role, email_verified)
-         VALUES ($1, $2, 'admin', true)
-         ON CONFLICT (email) DO NOTHING
-         RETURNING id",
-    )
-    .bind(DEV_ADMIN_EMAIL)
-    .bind(hashed)
-    .fetch_optional(db)
-    .await
-    .ok()
-    .flatten();
-    let id = match inserted {
-        Some(id) => id,
-        // Already exists (or the insert failed for another reason) — look it up.
-        None => {
-            let existing =
-                sqlx::query_scalar::<sqlx::Postgres, i32>("SELECT id FROM users WHERE email = $1")
-                    .bind(DEV_ADMIN_EMAIL)
-                    .fetch_one(db)
-                    .await;
-            match existing {
-                Ok(id) => id,
-                Err(err) => {
-                    eprintln!("[seed] failed: {err}");
-                    return;
+    let hashed = crate::auth::hash_password(DEV_PASSWORD);
+    for (email, role, first, last) in DEV_USERS {
+        // Conflict (no row) and DB errors both fall through to the lookup, like
+        // Go's err != nil branch.
+        let inserted: Option<i32> = sqlx::query_scalar(
+            "INSERT INTO users (email, password, role, email_verified)
+             VALUES ($1, $2, $3, true)
+             ON CONFLICT (email) DO NOTHING
+             RETURNING id",
+        )
+        .bind(email)
+        .bind(hashed.as_str())
+        .bind(role)
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten();
+        let id = match inserted {
+            Some(id) => id,
+            // Already exists (or the insert failed for another reason) — look it up.
+            None => {
+                let existing = sqlx::query_scalar::<sqlx::Postgres, i32>(
+                    "SELECT id FROM users WHERE email = $1",
+                )
+                .bind(email)
+                .fetch_one(db)
+                .await;
+                match existing {
+                    Ok(id) => id,
+                    Err(err) => {
+                        eprintln!("[seed] failed for {email}: {err}");
+                        continue;
+                    }
                 }
             }
+        };
+        // Pre-fill the profile too, so the dev user isn't stopped by the
+        // onboarding gate (see the onboarding gates in api/mod.rs).
+        if let Err(err) = sqlx::query(
+            "INSERT INTO user_profiles (user_id, first_name, last_name, address, state, zip, phone)
+             VALUES ($1, $2, $3, 'N/A', 'N/A', '00000', 'N/A')
+             ON CONFLICT (user_id) DO NOTHING",
+        )
+        .bind(id)
+        .bind(first)
+        .bind(last)
+        .execute(db)
+        .await
+        {
+            eprintln!("[seed] failed for {email}: {err}");
+            continue;
         }
-    };
-    // Pre-fill the profile too, so the dev admin isn't stopped by its own
-    // onboarding gate (see the onboarding gates in api/mod.rs).
-    if let Err(err) = sqlx::query(
-        "INSERT INTO user_profiles (user_id, first_name, last_name, address, state, zip, phone)
-         VALUES ($1, 'Dev', 'Admin', 'N/A', 'N/A', '00000', 'N/A')
-         ON CONFLICT (user_id) DO NOTHING",
-    )
-    .bind(id)
-    .execute(db)
-    .await
-    {
-        eprintln!("[seed] failed: {err}");
-        return;
+        eprintln!("[seed] dev user ready: {email} ({role})");
     }
-    eprintln!("[seed] dev admin ready: {DEV_ADMIN_EMAIL}");
 }
 
 // ---- demo catalog + inventory ----
@@ -249,18 +262,18 @@ pub async fn seed_dev_inventory(cfg: &Config, db: &PgPool) {
     if has_products {
         return;
     }
-    // Ledger attribution: the dev admin seeded above.
-    let admin_id: i32 = match sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
-        .bind(DEV_ADMIN_EMAIL)
-        .fetch_one(db)
-        .await
-    {
-        Ok(id) => id,
-        Err(err) => {
-            fail("dev admin lookup", err);
-            return;
-        }
-    };
+    // Ledger attribution: the dev admin seeded above (first entry in DEV_USERS).
+    let admin_id: i32 =
+        match sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@mail.com'")
+            .fetch_one(db)
+            .await
+        {
+            Ok(id) => id,
+            Err(err) => {
+                fail("dev admin lookup", err);
+                return;
+            }
+        };
 
     let mut tx = match db.begin().await {
         Ok(tx) => tx,
@@ -623,6 +636,6 @@ fn response_text(_response: &axum::response::Response) -> &'static str {
 // Run both dev seeds in order — the inventory seed attributes its movements
 // to the admin created by the first.
 pub async fn run(cfg: &Config, db: &PgPool) {
-    seed_dev_admin(cfg, db).await;
+    seed_dev_users(cfg, db).await;
     seed_dev_inventory(cfg, db).await;
 }

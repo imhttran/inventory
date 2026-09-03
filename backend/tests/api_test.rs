@@ -614,10 +614,11 @@ async fn set_role_subcommand() {
     env.cleanup().await;
 }
 
-// Dev-admin seed: creates (and re-creates idempotently) admin@mail.com with a
-// pre-filled profile, so local dev needs no manual set-role.
+// Dev-user seed: creates (and re-creates idempotently) one login per role —
+// admin/staff/user@mail.com — each with a pre-filled profile, so local dev
+// needs no manual set-role.
 #[tokio::test]
-async fn dev_admin_seed() {
+async fn dev_users_seed() {
     let Some(dsn) = test_dsn() else { return };
     let pool = PgPool::connect(&dsn)
         .await
@@ -625,31 +626,43 @@ async fn dev_admin_seed() {
     backend::migrate(&pool).await;
 
     let cfg = test_config("development");
-    backend::seed_dev_admin(&cfg, &pool).await;
-    backend::seed_dev_admin(&cfg, &pool).await; // second run is a no-op
+    backend::seed_dev_users(&cfg, &pool).await;
+    backend::seed_dev_users(&cfg, &pool).await; // second run is a no-op
 
-    let role: String = sqlx::query_scalar("SELECT role FROM users WHERE email = 'admin@mail.com'")
+    for (email, role) in [
+        ("admin@mail.com", "admin"),
+        ("staff@mail.com", "staff"),
+        ("user@mail.com", "client"),
+    ] {
+        let seeded: String = sqlx::query_scalar("SELECT role FROM users WHERE email = $1")
+            .bind(email)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|_| panic!("seeded {email} exists"));
+        assert_eq!(seeded, role);
+        let profile_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                SELECT 1 FROM user_profiles p JOIN users u ON u.id = p.user_id
+                WHERE u.email = $1
+            )",
+        )
+        .bind(email)
         .fetch_one(&pool)
         .await
-        .expect("seeded admin exists");
-    assert_eq!(role, "admin");
-    let profile_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS (
-            SELECT 1 FROM user_profiles p JOIN users u ON u.id = p.user_id
-            WHERE u.email = 'admin@mail.com'
-        )",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("profile check");
-    assert!(profile_exists, "seeded admin should have a profile");
+        .expect("profile check");
+        assert!(profile_exists, "seeded {email} should have a profile");
+    }
 
-    let _ = sqlx::query("DELETE FROM users WHERE email = 'admin@mail.com'")
-        .execute(&pool)
-        .await; // cascades profile
-    let _ = sqlx::query(r#"DELETE FROM email_queue WHERE "to" = 'admin@mail.com'"#)
-        .execute(&pool)
-        .await;
+    let _ = sqlx::query(
+        "DELETE FROM users WHERE email IN ('admin@mail.com', 'staff@mail.com', 'user@mail.com')",
+    )
+    .execute(&pool)
+    .await; // cascades profiles
+    let _ = sqlx::query(
+        r#"DELETE FROM email_queue WHERE "to" IN ('admin@mail.com', 'staff@mail.com', 'user@mail.com')"#,
+    )
+    .execute(&pool)
+    .await;
     pool.close().await;
 }
 

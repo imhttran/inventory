@@ -34,7 +34,7 @@ pub use auth::roles;
 pub use auth::users;
 pub use database::migrate;
 pub use events as queue;
-pub use seed::{seed_dev_admin, seed_dev_inventory};
+pub use seed::{seed_dev_inventory, seed_dev_users};
 
 use sqlx::PgPool;
 

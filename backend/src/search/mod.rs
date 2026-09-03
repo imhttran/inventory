@@ -168,6 +168,25 @@ pub async fn reindex_all(state: &AppState) -> Result<usize, String> {
         .fetch_all(&state.db)
         .await
         .map_err(|err| err.to_string())?;
+    // A rebuild must not leave orphans: products that vanished from Postgres
+    // (wiped catalog, lost delete events) would otherwise haunt search
+    // results forever. Clear the index, then bulk-index fresh.
+    let clear_url = format!(
+        "{}/{}/_delete_by_query?conflicts=proceed",
+        base_url(state),
+        state.cfg.search_index
+    );
+    let response = http()
+        .post(&clear_url)
+        .json(&json!({ "query": { "match_all": {} } }))
+        .send()
+        .await
+        .map_err(|err| format!("request failed: {err}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("index clear failed: {status} {body}"));
+    }
     if docs.is_empty() {
         return Ok(0);
     }

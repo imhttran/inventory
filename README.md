@@ -1,5 +1,7 @@
 # Auto Parts Inventory
 
+📺 [Demo video](demo/demo-take3-final-narrated.mp4) (auth, catalog, sourcing, inventory, search walkthrough)
+
 Automotive part inventory: **Next.js → Rust API → PostgreSQL (source of truth) + Elasticsearch (search)**. The browser only ever talks to Next.js; the Rust API is proxied server-side and never exposed directly.
 
 ```
@@ -30,7 +32,8 @@ make infra      # starts PostgreSQL + Elasticsearch containers
 ./manage.sh     # → [7] First-Time Setup, then → [1] Start All
 ```
 
-Dev admin: **admin@mail.com** / **Password1234!** — first login from a new
+Dev logins (one per role, all **Password1234!**): **admin@mail.com** (admin),
+**staff@mail.com** (staff), **user@mail.com** (client) — first login from a new
 browser asks for a 2FA code; in development it's always `1234`, and the browser
 is trusted afterwards.
 
