@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { API_BASE, callApi, renewSessionFrom } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { callApi } from "@/lib/api";
+import { usePartsSearch, SOURCE_LABEL } from "@/lib/usePartsSearch";
 import { PageHeader } from "@/components/PageHeader";
 import { PageTitle } from "@/components/PageTitle";
 import { AppShell } from "@/components/AppShell";
@@ -14,38 +15,9 @@ type MeUser = {
   hasProfile?: boolean;
 };
 
-type SearchHit = {
-  id: string;
-  sku: string;
-  partNumber: string | null;
-  name: string;
-  brand: string;
-  category: string;
-  score: number;
-};
-
-type SearchResponse = {
-  products: SearchHit[];
-  source: "elasticsearch" | "postgres" | "none";
-  message?: string;
-};
-
-const DEBOUNCE_MS = 300;
-
-// Source label — the API serves from Elasticsearch when it's up and falls
-// back to Postgres ILIKE otherwise; the badge makes the engine visible.
-const SOURCE_LABEL: Record<SearchResponse["source"], string> = {
-  elasticsearch: "via Elasticsearch",
-  postgres: "via PostgreSQL (fallback)",
-  none: "",
-};
-
 export default function SearchPage() {
   const [me, setMe] = useState<MeUser | null>(null);
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchHit[] | null>(null);
-  const [source, setSource] = useState<SearchResponse["source"]>("none");
-  const [failed, setFailed] = useState(false);
+  const { query, setQuery, results, source, failed } = usePartsSearch(!!me);
 
   // Auth-on-mount, same gates as the dashboard (temp password, then profile).
   useEffect(() => {
@@ -79,39 +51,6 @@ export default function SearchPage() {
       setMe(user);
     })();
   }, []);
-
-  const runSearch = useCallback(async (authToken: string, q: string) => {
-    if (!q.trim()) {
-      setResults(null);
-      return;
-    }
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/v1/search?q=${encodeURIComponent(q.trim())}`,
-        { headers: { Authorization: `Bearer ${authToken}` } },
-      );
-      renewSessionFrom(response);
-      const data = (await response.json()) as SearchResponse;
-      if (!response.ok) throw new Error(data.message ?? "search failed");
-      setResults(data.products ?? []);
-      setSource(data.source ?? "none");
-      setFailed(false);
-    } catch {
-      setFailed(true);
-      setResults([]);
-    }
-  }, []);
-
-  // Debounced live search — typing re-queries after a short pause.
-  useEffect(() => {
-    if (!me) return;
-    const authToken = localStorage.getItem("auth_token");
-    if (!authToken) return;
-    const timer = setTimeout(() => {
-      void runSearch(authToken, query);
-    }, DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [me, query, runSearch]);
 
   return (
     <AppShell>

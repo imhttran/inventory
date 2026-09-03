@@ -13,6 +13,7 @@ import {
 import { API_BASE, callApi, renewSessionFrom } from "@/lib/api";
 import { formKeys } from "@/lib/formKeys";
 import { ROLES, hasRole } from "@/lib/roles";
+import { usePartsSearch, SOURCE_LABEL } from "@/lib/usePartsSearch";
 import { PageHeader } from "@/components/PageHeader";
 import { SystemStatus } from "@/components/SystemStatus";
 import { PageFooter } from "@/components/PageFooter";
@@ -173,6 +174,9 @@ export default function DashboardPage() {
 
   const isAdmin = me ? hasRole(me.role, "admin") : false;
   const isStaff = me ? hasRole(me.role, "staff") : false;
+
+  // Dashboard quick search — same debounced catalog search as the Search page.
+  const search = usePartsSearch(!!me);
 
   const loadUsers = useCallback(async (authToken: string) => {
     try {
@@ -337,6 +341,70 @@ export default function DashboardPage() {
         </PageHeader>
 
         <SystemStatus />
+
+        <div className="dashboard-card">
+          <div className="user-list-section">
+            <h2>Search parts</h2>
+            <div className="product-filters">
+              <input
+                type="search"
+                placeholder="Search parts — e.g. brake pads, 210-0427, Bosch…"
+                value={search.query}
+                onChange={(event) => search.setQuery(event.target.value)}
+                aria-label="Search parts"
+              />
+              {search.results !== null && !search.failed && (
+                <span className="search-source">
+                  {SOURCE_LABEL[search.source]}
+                </span>
+              )}
+            </div>
+            <div className="table-scroll">
+              <table className="user-table">
+                <thead>
+                  <tr>
+                    <th>SKU</th>
+                    <th>Part #</th>
+                    <th>Name</th>
+                    <th>Brand</th>
+                    <th>Category</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {search.results === null ? (
+                    <tr>
+                      <td colSpan={6}>Type to search the catalog.</td>
+                    </tr>
+                  ) : search.failed ? (
+                    <tr>
+                      <td colSpan={6}>
+                        Search failed. Is the backend running?
+                      </td>
+                    </tr>
+                  ) : search.results.length === 0 ? (
+                    <tr>
+                      <td colSpan={6}>No parts match “{search.query}”.</td>
+                    </tr>
+                  ) : (
+                    search.results.map((hit) => (
+                      <tr key={hit.id}>
+                        <td>{hit.sku}</td>
+                        <td>{hit.partNumber || "—"}</td>
+                        <td>{hit.name}</td>
+                        <td>{hit.brand}</td>
+                        <td>{hit.category}</td>
+                        <td>
+                          <a href={`/products/${hit.id}`}>View</a>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
 
         <div className="dashboard-card">
           {isStaff && (
