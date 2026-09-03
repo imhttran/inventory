@@ -39,19 +39,21 @@ password reset) lands in **Mailpit** — inbox UI at http://localhost:8025,
 SMTP on :1025 (wired via `SMTP_HOST=mailpit` in `docker-compose.yml`; the
 mailer's opportunistic STARTTLS falls back to plain SMTP, so no TLS setup).
 The inbox is in-memory — restarting the Mailpit container clears it. Native
-dev without `SMTP_HOST` set logs emails to the backend console instead.
+dev gets the same inbox through `make infra` (it starts Mailpit): set
+`SMTP_HOST=localhost` and `SMTP_PORT=1025` in your root `.env`. Without
+`SMTP_HOST` set, emails are logged to the backend console instead.
 
 ## Docker helpers (Makefile)
 
-| Target                    | What it does                                                     |
-| ------------------------- | ---------------------------------------------------------------- |
-| `make infra`              | Start PostgreSQL + Elasticsearch (what native dev needs)         |
-| `make seed`               | One-shot dev seed against the db container                       |
-| `make app`                | Build + run the full containerized stack                         |
-| `make stop` / `make down` | Stop containers (keep) / remove them (volumes kept)              |
-| `make logs S=backend`     | Tail logs (`frontend`, `db`, `elasticsearch`, `mailpit`, or all) |
-| `make ps` / `make health` | Container status / backend health probe                          |
-| `make nuke`               | Delete containers **and all data** (typed confirmation)          |
+| Target                    | What it does                                                       |
+| ------------------------- | ------------------------------------------------------------------ |
+| `make infra`              | Start PostgreSQL + Elasticsearch + Mailpit (what native dev needs) |
+| `make seed`               | One-shot dev seed against the db container                         |
+| `make app`                | Build + run the full containerized stack                           |
+| `make stop` / `make down` | Stop containers (keep) / remove them (volumes kept)                |
+| `make logs S=backend`     | Tail logs (`frontend`, `db`, `elasticsearch`, `mailpit`, or all)   |
+| `make ps` / `make health` | Container status / backend health probe                            |
+| `make nuke`               | Delete containers **and all data** (typed confirmation)            |
 
 `./manage.sh` covers the same ground through a menu (plus setup, tests, role
 granting, DB reset/re-seed).

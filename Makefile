@@ -11,7 +11,7 @@ COMPOSE := docker compose
 PROFILE := --profile app
 
 .DEFAULT_GOAL := help
-.PHONY: help db es infra seed app stop down logs ps nuke health
+.PHONY: help db es mailpit infra seed app stop down logs ps nuke health
 
 help: ## Show this help
 	@echo "Docker workflows (native dev stays in ./manage.sh):"
@@ -28,7 +28,10 @@ es: ## Start Elasticsearch (waits until it answers)
 	@curl -sf -o /dev/null http://localhost:9200 && echo "Elasticsearch: http://localhost:9200" \
 		|| { echo "Elasticsearch did not come up — try: docker compose logs elasticsearch"; exit 1; }
 
-infra: db es ## Start the infra services native development needs
+mailpit: ## Start Mailpit (dev email sink — inbox UI http://localhost:8025)
+	$(COMPOSE) up -d mailpit
+
+infra: db es mailpit ## Start the infra services native development needs
 
 seed: ## One-shot dev seed against the db container (builds the image first)
 	$(COMPOSE) build seed
