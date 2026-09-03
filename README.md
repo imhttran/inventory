@@ -1,6 +1,6 @@
 # Auto Parts Inventory
 
-📺 [Demo video](demo/demo-take3-final-narrated.mp4) (auth, catalog, sourcing, inventory, search walkthrough)
+📺 [Demo video](https://github.com/imhttran/inventory/issues/1#issue-5341419526) (auth, catalog, sourcing, inventory, search walkthrough)
 
 Automotive part inventory: **Next.js → Rust API → PostgreSQL (source of truth) + Elasticsearch (search)**. The browser only ever talks to Next.js; the Rust API is proxied server-side and never exposed directly.
 
