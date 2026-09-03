@@ -11,6 +11,7 @@ import { API_BASE, callApi, renewSessionFrom } from "@/lib/api";
 import { hasRole } from "@/lib/roles";
 import { PageHeader } from "@/components/PageHeader";
 import { PageTitle } from "@/components/PageTitle";
+import { AppShell } from "@/components/AppShell";
 
 type MeUser = {
   id: number;
@@ -213,186 +214,188 @@ export default function SuppliersPage() {
   };
 
   return (
-    <div className="dashboard-container wide">
-      <PageTitle title="Suppliers | Auto Parts" />
-      <PageHeader title="Suppliers" subtitle="Vendors and purchase sources.">
-        <a className="logout-link" href="/dashboard">
-          Back to Dashboard
-        </a>
-      </PageHeader>
+    <AppShell>
+      <div className="dashboard-container wide">
+        <PageTitle title="Suppliers | Auto Parts" />
+        <PageHeader
+          title="Suppliers"
+          subtitle="Vendors and purchase sources."
+        />
 
-      {isStaff && (
-        <div className="dashboard-card">
-          <details ref={addFormRef}>
-            <summary className="add-user-toggle">
-              {editingId ? "Edit Supplier" : "Add Supplier"}
-            </summary>
-            {/* key: defaults must re-seed whenever the edited row changes. */}
-            <form
-              key={editingId ?? "new"}
-              className="add-user-form"
-              onSubmit={handleSave}
-            >
-              <input
-                type="text"
-                name="name"
-                placeholder="Supplier name"
-                defaultValue={editingSupplier?.name ?? ""}
-                required
-              />
-              <input
-                type="text"
-                name="supplierCode"
-                placeholder="Supplier code"
-                defaultValue={editingSupplier?.supplierCode ?? ""}
-              />
-              <input
-                type="tel"
-                name="phone"
-                placeholder="Phone"
-                defaultValue={editingSupplier?.phone ?? ""}
-              />
-              <input
-                type="email"
-                name="email"
-                placeholder="Email"
-                defaultValue={editingSupplier?.email ?? ""}
-              />
-              <input
-                type="text"
-                name="addressLine1"
-                placeholder="Address line 1"
-                defaultValue={editingSupplier?.addressLine1 ?? ""}
-              />
-              <input
-                type="text"
-                name="addressLine2"
-                placeholder="Address line 2"
-                defaultValue={editingSupplier?.addressLine2 ?? ""}
-              />
-              <input
-                type="text"
-                name="city"
-                placeholder="City"
-                defaultValue={editingSupplier?.city ?? ""}
-              />
-              <input
-                type="text"
-                name="state"
-                placeholder="State"
-                defaultValue={editingSupplier?.state ?? ""}
-              />
-              <input
-                type="text"
-                name="postalCode"
-                placeholder="Postal code"
-                defaultValue={editingSupplier?.postalCode ?? ""}
-              />
-              <input
-                type="text"
-                name="country"
-                placeholder="Country (USA)"
-                defaultValue={editingSupplier?.country ?? ""}
-              />
-              <button type="submit" className="login-button">
-                {editingId ? "Save Changes" : "Add Supplier"}
-              </button>
-              {editingId && (
-                <button
-                  type="button"
-                  className="login-button"
-                  onClick={cancelEdit}
-                >
-                  Cancel
+        {isStaff && (
+          <div className="dashboard-card">
+            <details ref={addFormRef}>
+              <summary className="add-user-toggle">
+                {editingId ? "Edit Supplier" : "Add Supplier"}
+              </summary>
+              {/* key: defaults must re-seed whenever the edited row changes. */}
+              <form
+                key={editingId ?? "new"}
+                className="add-user-form"
+                onSubmit={handleSave}
+              >
+                <input
+                  type="text"
+                  name="name"
+                  placeholder="Supplier name"
+                  defaultValue={editingSupplier?.name ?? ""}
+                  required
+                />
+                <input
+                  type="text"
+                  name="supplierCode"
+                  placeholder="Supplier code"
+                  defaultValue={editingSupplier?.supplierCode ?? ""}
+                />
+                <input
+                  type="tel"
+                  name="phone"
+                  placeholder="Phone"
+                  defaultValue={editingSupplier?.phone ?? ""}
+                />
+                <input
+                  type="email"
+                  name="email"
+                  placeholder="Email"
+                  defaultValue={editingSupplier?.email ?? ""}
+                />
+                <input
+                  type="text"
+                  name="addressLine1"
+                  placeholder="Address line 1"
+                  defaultValue={editingSupplier?.addressLine1 ?? ""}
+                />
+                <input
+                  type="text"
+                  name="addressLine2"
+                  placeholder="Address line 2"
+                  defaultValue={editingSupplier?.addressLine2 ?? ""}
+                />
+                <input
+                  type="text"
+                  name="city"
+                  placeholder="City"
+                  defaultValue={editingSupplier?.city ?? ""}
+                />
+                <input
+                  type="text"
+                  name="state"
+                  placeholder="State"
+                  defaultValue={editingSupplier?.state ?? ""}
+                />
+                <input
+                  type="text"
+                  name="postalCode"
+                  placeholder="Postal code"
+                  defaultValue={editingSupplier?.postalCode ?? ""}
+                />
+                <input
+                  type="text"
+                  name="country"
+                  placeholder="Country (USA)"
+                  defaultValue={editingSupplier?.country ?? ""}
+                />
+                <button type="submit" className="login-button">
+                  {editingId ? "Save Changes" : "Add Supplier"}
                 </button>
-              )}
-            </form>
-          </details>
-        </div>
-      )}
+                {editingId && (
+                  <button
+                    type="button"
+                    className="login-button"
+                    onClick={cancelEdit}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </form>
+            </details>
+          </div>
+        )}
 
-      <div className="dashboard-card">
-        <div className="table-scroll">
-          <table className="user-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Code</th>
-                <th>Phone</th>
-                <th>Email</th>
-                <th>City</th>
-                <th>Country</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {suppliers === null && !failed ? (
+        <div className="dashboard-card">
+          <div className="table-scroll">
+            <table className="user-table">
+              <thead>
                 <tr>
-                  <td colSpan={7}>Loading…</td>
+                  <th>Name</th>
+                  <th>Code</th>
+                  <th>Phone</th>
+                  <th>Email</th>
+                  <th>City</th>
+                  <th>Country</th>
+                  <th>Actions</th>
                 </tr>
-              ) : failed ? (
-                <tr>
-                  <td colSpan={7}>
-                    Failed to load suppliers. Is the backend running?
-                  </td>
-                </tr>
-              ) : rows.length === 0 ? (
-                <tr>
-                  <td colSpan={7}>No suppliers yet.</td>
-                </tr>
-              ) : (
-                rows.map((supplier) => (
-                  <tr key={supplier.id}>
-                    <td>{supplier.name}</td>
-                    <td>{supplier.supplierCode || "—"}</td>
-                    <td>{supplier.phone || "—"}</td>
-                    <td>{supplier.email || "—"}</td>
-                    <td>{supplier.city || "—"}</td>
-                    <td>{supplier.country}</td>
-                    <td>
-                      {isStaff && (
-                        <>
-                          <button
-                            type="button"
-                            className="logout-link"
-                            onClick={() => startEdit(supplier)}
-                          >
-                            Edit
-                          </button>
-                          {isAdmin && (
-                            <button
-                              type="button"
-                              className="logout-link"
-                              onClick={() => {
-                                withToken(async (authToken) => {
-                                  const result = await sendJson(
-                                    authToken,
-                                    `/api/v1/suppliers/${supplier.id}`,
-                                    "DELETE",
-                                    undefined,
-                                  );
-                                  if (result.ok) {
-                                    if (editingId === supplier.id) cancelEdit();
-                                    await loadSuppliers(authToken);
-                                  } else {
-                                    alert(`Error: ${result.message}`);
-                                  }
-                                });
-                              }}
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </>
-                      )}
+              </thead>
+              <tbody>
+                {suppliers === null && !failed ? (
+                  <tr>
+                    <td colSpan={7}>Loading…</td>
+                  </tr>
+                ) : failed ? (
+                  <tr>
+                    <td colSpan={7}>
+                      Failed to load suppliers. Is the backend running?
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7}>No suppliers yet.</td>
+                  </tr>
+                ) : (
+                  rows.map((supplier) => (
+                    <tr key={supplier.id}>
+                      <td>{supplier.name}</td>
+                      <td>{supplier.supplierCode || "—"}</td>
+                      <td>{supplier.phone || "—"}</td>
+                      <td>{supplier.email || "—"}</td>
+                      <td>{supplier.city || "—"}</td>
+                      <td>{supplier.country}</td>
+                      <td>
+                        {isStaff && (
+                          <>
+                            <button
+                              type="button"
+                              className="link-button"
+                              onClick={() => startEdit(supplier)}
+                            >
+                              Edit
+                            </button>
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                className="logout-link"
+                                onClick={() => {
+                                  withToken(async (authToken) => {
+                                    const result = await sendJson(
+                                      authToken,
+                                      `/api/v1/suppliers/${supplier.id}`,
+                                      "DELETE",
+                                      undefined,
+                                    );
+                                    if (result.ok) {
+                                      if (editingId === supplier.id)
+                                        cancelEdit();
+                                      await loadSuppliers(authToken);
+                                    } else {
+                                      alert(`Error: ${result.message}`);
+                                    }
+                                  });
+                                }}
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

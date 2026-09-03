@@ -627,3 +627,142 @@ pub async fn list_transactions(
         Err(err) => respond_500("List Transactions Error", err, false),
     }
 }
+
+// The audit-trail row for cross-product feeds: adds the part identity so a
+// global ledger can name what moved without a second lookup.
+#[derive(sqlx::FromRow, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecentLedgerRow {
+    id: Uuid,
+    product_id: Uuid,
+    transaction_type: String,
+    quantity: i32,
+    quantity_before: i32,
+    quantity_after: i32,
+    notes: Option<String>,
+    created_by_email: Option<String>,
+    created_at: DateTime<Utc>,
+    warehouse_code: Option<String>,
+    location_code: Option<String>,
+    product_sku: String,
+    product_name: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct RecentQuery {
+    limit: Option<i64>,
+}
+
+// GET /api/v1/inventory/transactions/recent?limit=10 — the newest ledger rows
+// across every product and bin, for dashboard/inventory activity rails.
+pub async fn recent_transactions(
+    State(state): State<AppState>,
+    _user: AuthUser,
+    Query(query): Query<RecentQuery>,
+) -> Response {
+    let limit = query.limit.unwrap_or(10).clamp(1, 50);
+    let rows: Result<Vec<RecentLedgerRow>, _> = sqlx::query_as(
+        "SELECT t.id, t.product_id,
+                t.transaction_type::text AS transaction_type,
+                t.quantity, t.quantity_before, t.quantity_after, t.notes,
+                t.created_by, t.created_at,
+                u.email AS created_by_email,
+                w.code AS warehouse_code, l.code AS location_code,
+                p.sku AS product_sku, p.name AS product_name
+         FROM inventory_transactions t
+         JOIN products p ON p.id = t.product_id
+         LEFT JOIN warehouse_locations l ON l.id = t.warehouse_location_id
+         LEFT JOIN warehouses w ON w.id = l.warehouse_id
+         LEFT JOIN users u ON u.id = t.created_by
+         ORDER BY t.created_at DESC, t.id DESC
+         LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(&state.db)
+    .await;
+    match rows {
+        Ok(transactions) => respond(StatusCode::OK, json!({ "transactions": transactions })),
+        Err(err) => respond_500("Recent Transactions Error", err, false),
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct HistoryDay {
+    day: chrono::NaiveDate,
+    net_on_hand_delta: i64,
+    damage_units: i64,
+    movement_count: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryBucket {
+    date: chrono::NaiveDate,
+    net_on_hand_delta: i64,
+    damage_units: i64,
+    movement_count: i64,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct HistoryQuery {
+    days: Option<i64>,
+}
+
+// GET /api/v1/inventory/history?days=14 — daily ledger deltas for the
+// dashboard/inventory sparklines. Only fields the ledger can actually answer
+// (net on-hand movement, damage units, movement count): a SKU's low-stock
+// status isn't recorded per day anywhere, so that stat card has no trend.
+pub async fn history(
+    State(state): State<AppState>,
+    _user: AuthUser,
+    Query(query): Query<HistoryQuery>,
+) -> Response {
+    let days = query.days.unwrap_or(14).clamp(1, 90);
+    let rows: Result<Vec<HistoryDay>, _> = sqlx::query_as(
+        "SELECT date_trunc('day', created_at)::date AS day,
+                COALESCE(SUM(quantity), 0) AS net_on_hand_delta,
+                COALESCE(SUM(CASE WHEN transaction_type = 'DAMAGE' THEN -quantity ELSE 0 END), 0) AS damage_units,
+                COUNT(*) AS movement_count
+         FROM inventory_transactions
+         WHERE created_at >= now() - ($1 * interval '1 day')
+         GROUP BY day",
+    )
+    .bind(days as f64)
+    .fetch_all(&state.db)
+    .await;
+
+    let rows = match rows {
+        Ok(rows) => rows,
+        Err(err) => return respond_500("Inventory History Error", err, false),
+    };
+
+    // Fill in every day in range with zeros so the sparkline has one point
+    // per day even where nothing moved.
+    let today = Utc::now().date_naive();
+    let by_day: std::collections::HashMap<_, _> =
+        rows.into_iter().map(|r| (r.day, r)).collect();
+    let buckets: Vec<HistoryBucket> = (0..days)
+        .rev()
+        .map(|offset| {
+            let date = today - chrono::Duration::days(offset);
+            match by_day.get(&date) {
+                Some(r) => HistoryBucket {
+                    date,
+                    net_on_hand_delta: r.net_on_hand_delta,
+                    damage_units: r.damage_units,
+                    movement_count: r.movement_count,
+                },
+                None => HistoryBucket {
+                    date,
+                    net_on_hand_delta: 0,
+                    damage_units: 0,
+                    movement_count: 0,
+                },
+            }
+        })
+        .collect();
+
+    respond(StatusCode::OK, json!({ "days": buckets }))
+}

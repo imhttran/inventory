@@ -6,6 +6,7 @@ import { API_BASE, callApi, renewSessionFrom } from "@/lib/api";
 import { hasRole } from "@/lib/roles";
 import { PageHeader } from "@/components/PageHeader";
 import { PageTitle } from "@/components/PageTitle";
+import { AppShell } from "@/components/AppShell";
 
 type MeUser = {
   id: number;
@@ -35,6 +36,7 @@ type Product = {
   categoryId: string;
   category: string;
   active: boolean;
+  retailPrice: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -260,6 +262,8 @@ export default function ProductDetailPage() {
           description: data.get("description"),
           brandId: editBrandId,
           categoryId: editCategoryId,
+          retailPrice:
+            String(data.get("retailPrice") ?? "").trim() || undefined,
         },
       );
       if (result.ok) {
@@ -331,309 +335,327 @@ export default function ProductDetailPage() {
   };
 
   return (
-    <div className="dashboard-container">
-      <PageTitle
-        title={
-          product ? `${product.name} | Auto Parts` : "Product | Auto Parts"
-        }
-      />
-      <PageHeader
-        title={product ? product.name : "Product"}
-        subtitle={product ? `SKU ${product.sku}` : "Product details"}
-      >
-        <a className="logout-link" href="/products">
-          Back to Products
-        </a>
-      </PageHeader>
+    <AppShell>
+      <div className="dashboard-container">
+        <PageTitle
+          title={
+            product ? `${product.name} | Auto Parts` : "Product | Auto Parts"
+          }
+        />
+        <PageHeader
+          title={product ? product.name : "Product"}
+          subtitle={product ? `SKU ${product.sku}` : "Product details"}
+        />
 
-      {notFound ? (
-        <div className="dashboard-card">
-          <p>Product not found.</p>
-        </div>
-      ) : failed ? (
-        <div className="dashboard-card">
-          <p>Could not load this product. Is the backend running?</p>
-        </div>
-      ) : product === null ? (
-        <div className="dashboard-card">
-          <p>Loading…</p>
-        </div>
-      ) : (
-        <>
+        {notFound ? (
           <div className="dashboard-card">
-            <p>
-              <strong>SKU:</strong> {product.sku}
-            </p>
-            <p>
-              <strong>Part number:</strong> {product.partNumber || "—"}
-            </p>
-            <p>
-              <strong>Brand:</strong> {product.brand}
-            </p>
-            <p>
-              <strong>Category:</strong> {product.category}
-            </p>
-            <p>
-              <strong>Description:</strong> {product.description || "—"}
-            </p>
-            <p>
-              <strong>Created:</strong>{" "}
-              {new Date(product.createdAt).toLocaleString()}
-            </p>
-            <p>
-              <strong>Updated:</strong>{" "}
-              {new Date(product.updatedAt).toLocaleString()}
-            </p>
-            {isAdmin && (
-              <p>
-                <button
-                  type="button"
-                  className="logout-link"
-                  onClick={handleDelete}
-                >
-                  Delete Product
-                </button>
-              </p>
-            )}
+            <p>Product not found.</p>
           </div>
-
+        ) : failed ? (
           <div className="dashboard-card">
-            <h2>Sourcing</h2>
-            {sourcing !== null && sourcing.length > 0 && (
-              <div className="table-scroll">
-                <table className="user-table">
-                  <thead>
-                    <tr>
-                      <th>Supplier</th>
-                      <th>Part number</th>
-                      <th>Cost</th>
-                      <th>MOQ</th>
-                      <th>Lead days</th>
-                      <th>Preferred</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sourcing.map((row) => (
-                      <tr key={row.id}>
-                        <td>
-                          {row.supplierName}
-                          {row.supplierCode ? ` (${row.supplierCode})` : ""}
-                        </td>
-                        <td>{row.supplierPartNumber || "—"}</td>
-                        <td>
-                          {row.cost == null
-                            ? "—"
-                            : `$${Number(row.cost).toFixed(2)}`}
-                        </td>
-                        <td>{row.minimumOrderQuantity}</td>
-                        <td>{row.leadTimeDays ?? "—"}</td>
-                        <td>{row.preferred ? "Yes" : "—"}</td>
+            <p>Could not load this product. Is the backend running?</p>
+          </div>
+        ) : product === null ? (
+          <div className="dashboard-card">
+            <p>Loading…</p>
+          </div>
+        ) : (
+          <>
+            <div className="dashboard-card">
+              <p>
+                <strong>SKU:</strong> {product.sku}
+              </p>
+              <p>
+                <strong>Part number:</strong> {product.partNumber || "—"}
+              </p>
+              <p>
+                <strong>Retail price:</strong>{" "}
+                {product.retailPrice
+                  ? `$${Number(product.retailPrice).toFixed(2)}`
+                  : "—"}
+              </p>
+              <p>
+                <strong>Brand:</strong> {product.brand}
+              </p>
+              <p>
+                <strong>Category:</strong> {product.category}
+              </p>
+              <p>
+                <strong>Description:</strong> {product.description || "—"}
+              </p>
+              <p>
+                <strong>Created:</strong>{" "}
+                {new Date(product.createdAt).toLocaleString()}
+              </p>
+              <p>
+                <strong>Updated:</strong>{" "}
+                {new Date(product.updatedAt).toLocaleString()}
+              </p>
+              {isAdmin && (
+                <p>
+                  <button
+                    type="button"
+                    className="logout-link"
+                    onClick={handleDelete}
+                  >
+                    Delete Product
+                  </button>
+                </p>
+              )}
+            </div>
+
+            <div className="dashboard-card">
+              <h2>Sourcing</h2>
+              {sourcing !== null && sourcing.length > 0 && (
+                <div className="table-scroll">
+                  <table className="user-table">
+                    <thead>
+                      <tr>
+                        <th>Supplier</th>
+                        <th>Part number</th>
+                        <th>Cost</th>
+                        <th>MOQ</th>
+                        <th>Lead days</th>
+                        <th>Preferred</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {sourcing !== null && sourcing.length === 0 && (
-              <p>No suppliers linked to this product yet.</p>
-            )}
-            {isStaff && (
-              <details>
-                <summary className="add-user-toggle">Edit Sourcing</summary>
-                <div className="add-user-form">
-                  {draftSourcing.map((entry, index) => (
-                    <div key={index} className="sourcing-row">
-                      <select
-                        value={entry.supplierId}
-                        onChange={(event) =>
-                          updateDraft(index, { supplierId: event.target.value })
-                        }
-                        aria-label="Supplier"
-                      >
-                        <option value="">— Supplier —</option>
-                        {suppliers.map((supplier) => (
-                          <option key={supplier.id} value={supplier.id}>
-                            {supplier.name}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="text"
-                        placeholder="Part number"
-                        value={entry.supplierPartNumber}
-                        onChange={(event) =>
-                          updateDraft(index, {
-                            supplierPartNumber: event.target.value,
-                          })
-                        }
-                        aria-label="Supplier part number"
-                      />
-                      <input
-                        type="number"
-                        placeholder="Cost"
-                        min="0"
-                        step="0.01"
-                        value={entry.cost}
-                        onChange={(event) =>
-                          updateDraft(index, { cost: event.target.value })
-                        }
-                        aria-label="Cost"
-                      />
-                      <input
-                        type="number"
-                        placeholder="MOQ"
-                        min="1"
-                        value={entry.minimumOrderQuantity}
-                        onChange={(event) =>
-                          updateDraft(index, {
-                            minimumOrderQuantity: event.target.value,
-                          })
-                        }
-                        aria-label="Minimum order quantity"
-                      />
-                      <input
-                        type="number"
-                        placeholder="Lead days"
-                        min="0"
-                        value={entry.leadTimeDays}
-                        onChange={(event) =>
-                          updateDraft(index, {
-                            leadTimeDays: event.target.value,
-                          })
-                        }
-                        aria-label="Lead time days"
-                      />
-                      <label className="sourcing-preferred">
-                        <input
-                          type="checkbox"
-                          checked={entry.preferred}
+                    </thead>
+                    <tbody>
+                      {sourcing.map((row) => (
+                        <tr key={row.id}>
+                          <td>
+                            {row.supplierName}
+                            {row.supplierCode ? ` (${row.supplierCode})` : ""}
+                          </td>
+                          <td>{row.supplierPartNumber || "—"}</td>
+                          <td>
+                            {row.cost == null
+                              ? "—"
+                              : `$${Number(row.cost).toFixed(2)}`}
+                          </td>
+                          <td>{row.minimumOrderQuantity}</td>
+                          <td>{row.leadTimeDays ?? "—"}</td>
+                          <td>{row.preferred ? "Yes" : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {sourcing !== null && sourcing.length === 0 && (
+                <p>No suppliers linked to this product yet.</p>
+              )}
+              {isStaff && (
+                <details>
+                  <summary className="add-user-toggle">Edit Sourcing</summary>
+                  <div className="add-user-form">
+                    {draftSourcing.map((entry, index) => (
+                      <div key={index} className="sourcing-row">
+                        <select
+                          value={entry.supplierId}
                           onChange={(event) =>
+                            updateDraft(index, {
+                              supplierId: event.target.value,
+                            })
+                          }
+                          aria-label="Supplier"
+                        >
+                          <option value="">— Supplier —</option>
+                          {suppliers.map((supplier) => (
+                            <option key={supplier.id} value={supplier.id}>
+                              {supplier.name}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          placeholder="Part number"
+                          value={entry.supplierPartNumber}
+                          onChange={(event) =>
+                            updateDraft(index, {
+                              supplierPartNumber: event.target.value,
+                            })
+                          }
+                          aria-label="Supplier part number"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Cost"
+                          min="0"
+                          step="0.01"
+                          value={entry.cost}
+                          onChange={(event) =>
+                            updateDraft(index, { cost: event.target.value })
+                          }
+                          aria-label="Cost"
+                        />
+                        <input
+                          type="number"
+                          placeholder="MOQ"
+                          min="1"
+                          value={entry.minimumOrderQuantity}
+                          onChange={(event) =>
+                            updateDraft(index, {
+                              minimumOrderQuantity: event.target.value,
+                            })
+                          }
+                          aria-label="Minimum order quantity"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Lead days"
+                          min="0"
+                          value={entry.leadTimeDays}
+                          onChange={(event) =>
+                            updateDraft(index, {
+                              leadTimeDays: event.target.value,
+                            })
+                          }
+                          aria-label="Lead time days"
+                        />
+                        <label className="sourcing-preferred">
+                          <input
+                            type="checkbox"
+                            checked={entry.preferred}
+                            onChange={(event) =>
+                              setDraftSourcing((current) =>
+                                current.map((row, i) =>
+                                  i === index
+                                    ? {
+                                        ...row,
+                                        preferred: event.target.checked,
+                                      }
+                                    : event.target.checked
+                                      ? { ...row, preferred: false }
+                                      : row,
+                                ),
+                              )
+                            }
+                          />{" "}
+                          Preferred
+                        </label>
+                        <button
+                          type="button"
+                          className="logout-link"
+                          onClick={() =>
                             setDraftSourcing((current) =>
-                              current.map((row, i) =>
-                                i === index
-                                  ? { ...row, preferred: event.target.checked }
-                                  : event.target.checked
-                                    ? { ...row, preferred: false }
-                                    : row,
-                              ),
+                              current.filter((_, i) => i !== index),
                             )
                           }
-                        />{" "}
-                        Preferred
-                      </label>
-                      <button
-                        type="button"
-                        className="logout-link"
-                        onClick={() =>
-                          setDraftSourcing((current) =>
-                            current.filter((_, i) => i !== index),
-                          )
-                        }
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    className="login-button"
-                    onClick={() =>
-                      setDraftSourcing((current) => [
-                        ...current,
-                        {
-                          supplierId: "",
-                          supplierPartNumber: "",
-                          cost: "",
-                          minimumOrderQuantity: "1",
-                          leadTimeDays: "",
-                          preferred: current.length === 0,
-                        },
-                      ])
-                    }
-                  >
-                    + Supplier
-                  </button>
-                  <button
-                    type="button"
-                    className="login-button"
-                    disabled={draftSourcing.length === 0}
-                    onClick={handleSaveSourcing}
-                  >
-                    Save Sourcing
-                  </button>
-                </div>
-              </details>
-            )}
-          </div>
-
-          {isStaff && (
-            <div className="dashboard-card">
-              <details>
-                <summary className="add-user-toggle">Edit Product</summary>
-                {/* key: defaults must re-seed from the reloaded product after
-                    a successful save, so remount on updatedAt. */}
-                <form
-                  key={`${product.id}-${product.updatedAt}`}
-                  className="add-user-form"
-                  onSubmit={handleUpdate}
-                >
-                  <input
-                    type="text"
-                    name="sku"
-                    defaultValue={product.sku}
-                    required
-                  />
-                  <input
-                    type="text"
-                    name="name"
-                    defaultValue={product.name}
-                    required
-                  />
-                  <input
-                    type="text"
-                    name="partNumber"
-                    defaultValue={product.partNumber ?? ""}
-                    placeholder="Part number (MPN)"
-                  />
-                  <input
-                    type="text"
-                    name="description"
-                    defaultValue={product.description ?? ""}
-                    placeholder="Description"
-                  />
-                  <select
-                    value={editBrandId}
-                    onChange={(event) => setEditBrandId(event.target.value)}
-                    aria-label="Brand"
-                  >
-                    <option value="">— No brand —</option>
-                    {brands.map((brand) => (
-                      <option key={brand.id} value={brand.id}>
-                        {brand.name}
-                      </option>
+                        >
+                          Remove
+                        </button>
+                      </div>
                     ))}
-                  </select>
-                  <select
-                    value={editCategoryId}
-                    onChange={(event) => setEditCategoryId(event.target.value)}
-                    aria-label="Category"
-                  >
-                    <option value="">— No category —</option>
-                    {categories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button type="submit" className="login-button">
-                    Save Changes
-                  </button>
-                </form>
-              </details>
+                    <button
+                      type="button"
+                      className="login-button"
+                      onClick={() =>
+                        setDraftSourcing((current) => [
+                          ...current,
+                          {
+                            supplierId: "",
+                            supplierPartNumber: "",
+                            cost: "",
+                            minimumOrderQuantity: "1",
+                            leadTimeDays: "",
+                            preferred: current.length === 0,
+                          },
+                        ])
+                      }
+                    >
+                      + Supplier
+                    </button>
+                    <button
+                      type="button"
+                      className="login-button"
+                      disabled={draftSourcing.length === 0}
+                      onClick={handleSaveSourcing}
+                    >
+                      Save Sourcing
+                    </button>
+                  </div>
+                </details>
+              )}
             </div>
-          )}
-        </>
-      )}
-    </div>
+
+            {isStaff && (
+              <div className="dashboard-card">
+                <details>
+                  <summary className="add-user-toggle">Edit Product</summary>
+                  {/* key: defaults must re-seed from the reloaded product after
+                    a successful save, so remount on updatedAt. */}
+                  <form
+                    key={`${product.id}-${product.updatedAt}`}
+                    className="add-user-form"
+                    onSubmit={handleUpdate}
+                  >
+                    <input
+                      type="text"
+                      name="sku"
+                      defaultValue={product.sku}
+                      required
+                    />
+                    <input
+                      type="text"
+                      name="name"
+                      defaultValue={product.name}
+                      required
+                    />
+                    <input
+                      type="text"
+                      name="partNumber"
+                      defaultValue={product.partNumber ?? ""}
+                      placeholder="Part number (MPN)"
+                    />
+                    <input
+                      type="text"
+                      name="retailPrice"
+                      defaultValue={product.retailPrice ?? ""}
+                      placeholder="Retail price"
+                      inputMode="decimal"
+                    />
+                    <input
+                      type="text"
+                      name="description"
+                      defaultValue={product.description ?? ""}
+                      placeholder="Description"
+                    />
+                    <select
+                      value={editBrandId}
+                      onChange={(event) => setEditBrandId(event.target.value)}
+                      aria-label="Brand"
+                    >
+                      <option value="">— No brand —</option>
+                      {brands.map((brand) => (
+                        <option key={brand.id} value={brand.id}>
+                          {brand.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={editCategoryId}
+                      onChange={(event) =>
+                        setEditCategoryId(event.target.value)
+                      }
+                      aria-label="Category"
+                    >
+                      <option value="">— No category —</option>
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit" className="login-button">
+                      Save Changes
+                    </button>
+                  </form>
+                </details>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </AppShell>
   );
 }

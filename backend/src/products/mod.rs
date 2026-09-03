@@ -35,6 +35,7 @@ pub struct Product {
     pub category_id: Uuid,
     pub category: String,
     pub active: bool,
+    pub retail_price: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -50,10 +51,12 @@ struct ProductBody {
     description: Option<String>,
     brand_id: Option<Uuid>,
     category_id: Option<Uuid>,
+    retail_price: Option<String>,
 }
 
 const PRODUCT_SELECT: &str = "SELECT p.id, p.sku, p.name, p.description,
        p.brand_id, b.name AS brand, p.category_id, c.name AS category, p.active,
+       p.retail_price::text AS retail_price,
        p.created_at, p.updated_at,
        (SELECT pi.value FROM product_identifiers pi
         WHERE pi.product_id = p.id AND pi.identifier_type = 'MPN'
@@ -78,6 +81,7 @@ struct ValidatedProduct {
     description: Option<String>,
     brand_id: Uuid,
     category_id: Uuid,
+    retail_price: Option<String>,
 }
 
 async fn validate(state: &AppState, body: ProductBody) -> Result<ValidatedProduct, Response> {
@@ -117,6 +121,22 @@ async fn validate(state: &AppState, body: ProductBody) -> Result<ValidatedProduc
         }
     }
     let description = body.description.unwrap_or_default().trim().to_string();
+    // Kept as normalized text and cast in SQL (same pattern as sourcing cost):
+    // numeric parses here give a clean 400 instead of a cast-error 500.
+    let retail_price = body.retail_price.unwrap_or_default().trim().to_string();
+    let retail_price = if retail_price.is_empty() {
+        None
+    } else {
+        match retail_price.parse::<f64>() {
+            Ok(value) if value >= 0.0 => Some(retail_price),
+            _ => {
+                return Err(respond(
+                    StatusCode::BAD_REQUEST,
+                    msg("Retail price must be a non-negative number"),
+                ))
+            }
+        }
+    };
     Ok(ValidatedProduct {
         sku,
         part_number: body.part_number.unwrap_or_default().trim().to_string(),
@@ -128,6 +148,7 @@ async fn validate(state: &AppState, body: ProductBody) -> Result<ValidatedProduc
         },
         brand_id,
         category_id,
+        retail_price,
     })
 }
 
@@ -191,8 +212,8 @@ pub async fn create_product(
         Err(err) => return respond_500("Create Product Error", err, false),
     };
     let inserted = sqlx::query_scalar::<_, Uuid>(
-        "INSERT INTO products (sku, name, description, brand_id, category_id)
-         VALUES ($1, $2, $3, $4, $5)
+        "INSERT INTO products (sku, name, description, brand_id, category_id, retail_price)
+         VALUES ($1, $2, $3, $4, $5, CAST($6 AS numeric))
          RETURNING id",
     )
     .bind(&product.sku)
@@ -200,6 +221,7 @@ pub async fn create_product(
     .bind(&product.description)
     .bind(product.brand_id)
     .bind(product.category_id)
+    .bind(&product.retail_price)
     .fetch_one(&mut *tx)
     .await;
     let id = match inserted {
@@ -352,8 +374,9 @@ pub async fn update_product(
     };
     let updated = sqlx::query_scalar::<_, Uuid>(
         "UPDATE products SET sku = $1, name = $2, description = $3,
-                brand_id = $4, category_id = $5, updated_at = now()
-         WHERE id = $6
+                brand_id = $4, category_id = $5,
+                retail_price = CAST($6 AS numeric), updated_at = now()
+         WHERE id = $7
          RETURNING id",
     )
     .bind(&product.sku)
@@ -361,6 +384,7 @@ pub async fn update_product(
     .bind(&product.description)
     .bind(product.brand_id)
     .bind(product.category_id)
+    .bind(&product.retail_price)
     .bind(id)
     .fetch_optional(&mut *tx)
     .await;

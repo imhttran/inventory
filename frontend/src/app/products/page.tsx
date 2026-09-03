@@ -11,6 +11,7 @@ import { API_BASE, callApi, renewSessionFrom } from "@/lib/api";
 import { hasRole } from "@/lib/roles";
 import { PageHeader } from "@/components/PageHeader";
 import { PageTitle } from "@/components/PageTitle";
+import { AppShell } from "@/components/AppShell";
 
 type MeUser = {
   id: number;
@@ -258,6 +259,7 @@ export default function ProductsPage() {
         description: data.get("description"),
         brandId: formBrandId,
         categoryId: formCategoryId,
+        retailPrice: String(data.get("retailPrice") ?? "").trim() || undefined,
       });
       if (result.ok) {
         alert(result.message);
@@ -286,190 +288,204 @@ export default function ProductsPage() {
   const list = products ?? [];
 
   return (
-    <div className="dashboard-container wide">
-      <PageTitle title="Products | Auto Parts" />
-      <PageHeader title="Products" subtitle="Automotive parts catalog.">
-        <a className="logout-link" href="/dashboard">
-          Back to Dashboard
-        </a>
-      </PageHeader>
+    <AppShell>
+      <div className="dashboard-container wide">
+        <PageTitle title="Products | Auto Parts" />
+        <PageHeader title="Products" subtitle="Automotive parts catalog." />
 
-      {isStaff && (
+        {isStaff && (
+          <div className="dashboard-card">
+            <details ref={addProductRef}>
+              <summary className="add-user-toggle">Add Product</summary>
+              <form className="add-user-form" onSubmit={handleAddProduct}>
+                <input type="text" name="sku" placeholder="SKU" required />
+                <input type="text" name="name" placeholder="Name" required />
+                <input
+                  type="text"
+                  name="partNumber"
+                  placeholder="Part number (MPN)"
+                />
+                <input
+                  type="text"
+                  name="retailPrice"
+                  placeholder="Retail price"
+                  inputMode="decimal"
+                />
+                <input
+                  type="text"
+                  name="description"
+                  placeholder="Description"
+                />
+                <select
+                  value={formBrandId}
+                  onChange={(event) => setFormBrandId(event.target.value)}
+                  aria-label="Brand"
+                >
+                  <option value="">— No brand —</option>
+                  {brands.map((brand) => (
+                    <option key={brand.id} value={brand.id}>
+                      {brand.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="login-button"
+                  onClick={() => addLookup("brands")}
+                >
+                  + Brand
+                </button>
+                <select
+                  value={formCategoryId}
+                  onChange={(event) => setFormCategoryId(event.target.value)}
+                  aria-label="Category"
+                >
+                  <option value="">— No category —</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="login-button"
+                  onClick={() => addLookup("categories")}
+                >
+                  + Category
+                </button>
+                <button
+                  type="submit"
+                  className="login-button"
+                  disabled={!canSubmitProduct}
+                >
+                  Add Product
+                </button>
+              </form>
+            </details>
+          </div>
+        )}
+
         <div className="dashboard-card">
-          <details ref={addProductRef}>
-            <summary className="add-user-toggle">Add Product</summary>
-            <form className="add-user-form" onSubmit={handleAddProduct}>
-              <input type="text" name="sku" placeholder="SKU" required />
-              <input type="text" name="name" placeholder="Name" required />
-              <input
-                type="text"
-                name="partNumber"
-                placeholder="Part number (MPN)"
-              />
-              <input type="text" name="description" placeholder="Description" />
-              <select
-                value={formBrandId}
-                onChange={(event) => setFormBrandId(event.target.value)}
-                aria-label="Brand"
-              >
-                <option value="">— No brand —</option>
-                {brands.map((brand) => (
-                  <option key={brand.id} value={brand.id}>
-                    {brand.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="login-button"
-                onClick={() => addLookup("brands")}
-              >
-                + Brand
-              </button>
-              <select
-                value={formCategoryId}
-                onChange={(event) => setFormCategoryId(event.target.value)}
-                aria-label="Category"
-              >
-                <option value="">— No category —</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="login-button"
-                onClick={() => addLookup("categories")}
-              >
-                + Category
-              </button>
-              <button
-                type="submit"
-                className="login-button"
-                disabled={!canSubmitProduct}
-              >
-                Add Product
-              </button>
-            </form>
-          </details>
-        </div>
-      )}
+          <div className="product-filters">
+            <input
+              type="search"
+              placeholder="Search name, SKU, or part number…"
+              value={qInput}
+              onChange={(event) =>
+                changeFilter(() => setQInput(event.target.value))
+              }
+              aria-label="Search products"
+            />
+            <select
+              value={brandFilter}
+              onChange={(event) =>
+                changeFilter(() => setBrandFilter(event.target.value))
+              }
+              aria-label="Filter by brand"
+            >
+              <option value="">All brands</option>
+              {brands.map((brand) => (
+                <option key={brand.id} value={brand.name}>
+                  {brand.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={categoryFilter}
+              onChange={(event) =>
+                changeFilter(() => setCategoryFilter(event.target.value))
+              }
+              aria-label="Filter by category"
+            >
+              <option value="">All categories</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.name}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="login-button"
+              onClick={clearFilters}
+            >
+              Clear
+            </button>
+          </div>
 
-      <div className="dashboard-card">
-        <div className="product-filters">
-          <input
-            type="search"
-            placeholder="Search name, SKU, or part number…"
-            value={qInput}
-            onChange={(event) =>
-              changeFilter(() => setQInput(event.target.value))
-            }
-            aria-label="Search products"
-          />
-          <select
-            value={brandFilter}
-            onChange={(event) =>
-              changeFilter(() => setBrandFilter(event.target.value))
-            }
-            aria-label="Filter by brand"
-          >
-            <option value="">All brands</option>
-            {brands.map((brand) => (
-              <option key={brand.id} value={brand.name}>
-                {brand.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={categoryFilter}
-            onChange={(event) =>
-              changeFilter(() => setCategoryFilter(event.target.value))
-            }
-            aria-label="Filter by category"
-          >
-            <option value="">All categories</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.name}>
-                {category.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="login-button" onClick={clearFilters}>
-            Clear
-          </button>
-        </div>
-
-        <div className="table-scroll">
-          <table className="user-table">
-            <thead>
-              <tr>
-                <th>SKU</th>
-                <th>Part #</th>
-                <th>Name</th>
-                <th>Brand</th>
-                <th>Category</th>
-                <th>Updated</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {products === null && !failed ? (
+          <div className="table-scroll">
+            <table className="user-table">
+              <thead>
                 <tr>
-                  <td colSpan={7}>Loading…</td>
+                  <th>SKU</th>
+                  <th>Part #</th>
+                  <th>Name</th>
+                  <th>Brand</th>
+                  <th>Category</th>
+                  <th>Updated</th>
+                  <th />
                 </tr>
-              ) : failed ? (
-                <tr>
-                  <td colSpan={7}>
-                    Failed to load products. Is the backend running?
-                  </td>
-                </tr>
-              ) : list.length === 0 ? (
-                <tr>
-                  <td colSpan={7}>No products found.</td>
-                </tr>
-              ) : (
-                list.map((product) => (
-                  <tr key={product.id}>
-                    <td>{product.sku}</td>
-                    <td>{product.partNumber || "—"}</td>
-                    <td>{product.name}</td>
-                    <td>{product.brand}</td>
-                    <td>{product.category}</td>
-                    <td>{new Date(product.updatedAt).toLocaleDateString()}</td>
-                    <td>
-                      <a href={`/products/${product.id}`}>View</a>
+              </thead>
+              <tbody>
+                {products === null && !failed ? (
+                  <tr>
+                    <td colSpan={7}>Loading…</td>
+                  </tr>
+                ) : failed ? (
+                  <tr>
+                    <td colSpan={7}>
+                      Failed to load products. Is the backend running?
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ) : list.length === 0 ? (
+                  <tr>
+                    <td colSpan={7}>No products found.</td>
+                  </tr>
+                ) : (
+                  list.map((product) => (
+                    <tr key={product.id}>
+                      <td>{product.sku}</td>
+                      <td>{product.partNumber || "—"}</td>
+                      <td>{product.name}</td>
+                      <td>{product.brand}</td>
+                      <td>{product.category}</td>
+                      <td>
+                        {new Date(product.updatedAt).toLocaleDateString()}
+                      </td>
+                      <td>
+                        <a href={`/products/${product.id}`}>View</a>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
 
-        <p className="product-meta">
-          {total} product{total === 1 ? "" : "s"} · page {page} of {pageCount}
-          <button
-            type="button"
-            className="login-button"
-            disabled={page <= 1}
-            onClick={() => setPage((current) => Math.max(1, current - 1))}
-          >
-            Prev
-          </button>
-          <button
-            type="button"
-            className="login-button"
-            disabled={page >= pageCount}
-            onClick={() =>
-              setPage((current) => Math.min(pageCount, current + 1))
-            }
-          >
-            Next
-          </button>
-        </p>
+          <p className="product-meta">
+            {total} product{total === 1 ? "" : "s"} · page {page} of {pageCount}
+            <button
+              type="button"
+              className="login-button"
+              disabled={page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              className="login-button"
+              disabled={page >= pageCount}
+              onClick={() =>
+                setPage((current) => Math.min(pageCount, current + 1))
+              }
+            >
+              Next
+            </button>
+          </p>
+        </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

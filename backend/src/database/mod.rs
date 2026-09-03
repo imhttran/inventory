@@ -5,11 +5,18 @@ use sqlx::PgPool;
 use crate::fatal;
 
 // One consolidated schema migration; recorded in schema_migrations.
-pub const MIGRATIONS: &[(i32, &str, &str)] = &[(
-    1,
-    "001_init.sql",
-    include_str!("../../migrations/001_init.sql"),
-)];
+pub const MIGRATIONS: &[(i32, &str, &str)] = &[
+    (
+        1,
+        "001_init.sql",
+        include_str!("../../migrations/001_init.sql"),
+    ),
+    (
+        2,
+        "002_sale_counter.sql",
+        include_str!("../../migrations/002_sale_counter.sql"),
+    ),
+];
 
 pub async fn connect(dsn: &str, context: &str) -> PgPool {
     PgPool::connect(dsn)

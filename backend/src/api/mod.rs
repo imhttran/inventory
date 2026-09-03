@@ -65,6 +65,11 @@ pub fn new_router(state: AppState) -> Router {
         .route("/api/v1/inventory/adjust", post(inventory::adjust))
         .route("/api/v1/inventory/transfer", post(inventory::transfer))
         .route(
+            "/api/v1/inventory/transactions/recent",
+            get(inventory::recent_transactions),
+        )
+        .route("/api/v1/inventory/history", get(inventory::history))
+        .route(
             "/api/v1/inventory/{product_id}/transactions",
             get(inventory::list_transactions),
         )

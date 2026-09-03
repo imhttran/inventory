@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { SystemStatus } from "@/components/SystemStatus";
 import { PageFooter } from "@/components/PageFooter";
 import { PageTitle } from "@/components/PageTitle";
+import { AppShell } from "@/components/AppShell";
 
 const USERS_PER_PAGE = 10;
 
@@ -283,234 +284,229 @@ export default function DashboardPage() {
   };
 
   return (
-    <div
-      className={isStaff ? "dashboard-container wide" : "dashboard-container"}
-    >
-      <PageTitle title="Dashboard | Frontend Template" />
-      <PageHeader
-        title="Dashboard"
-        subtitle={
-          <>
-            Welcome back,{" "}
-            <span id="user-email" className="highlight">
-              {me?.email ?? "..."}
-            </span>
-            !
-          </>
-        }
+    <AppShell>
+      <div
+        className={isStaff ? "dashboard-container wide" : "dashboard-container"}
       >
-        <a className="logout-link" href="/" onClick={logout}>
-          Logout
-        </a>
-      </PageHeader>
+        <PageTitle title="Dashboard | Frontend Template" />
+        <PageHeader
+          title="Dashboard"
+          subtitle={
+            <>
+              Welcome back,{" "}
+              <span id="user-email" className="highlight">
+                {me?.email ?? "..."}
+              </span>
+              !
+            </>
+          }
+        >
+          <a className="logout-link" href="/" onClick={logout}>
+            Logout
+          </a>
+        </PageHeader>
 
-      <SystemStatus />
+        <SystemStatus />
 
-      <nav className="dashboard-nav">
-        <a href="/products">Products</a>
-        <a href="/inventory">Inventory</a>
-        <a href="/suppliers">Suppliers</a>
-        <a href="/search">Search</a>
-      </nav>
-
-      <div className="dashboard-card">
-        {isStaff && (
-          <div className="user-list-section">
-            <h2>Users</h2>
-            {isAdmin && (
-              <details ref={addUserDetailsRef}>
-                <summary className="add-user-toggle">Add User</summary>
-                <form className="add-user-form" onSubmit={handleAddUser}>
-                  <input
-                    type="email"
-                    name="email"
-                    placeholder="Email"
-                    required
-                  />
-                  <input
-                    type="password"
-                    name="password"
-                    placeholder="Temporary password"
-                    required
-                  />
-                  <button type="submit" className="login-button">
-                    Add User
-                  </button>
-                </form>
-              </details>
-            )}
-            <div className="table-scroll">
-              <table className="user-table">
-                <thead>
-                  <tr>
-                    {SORTABLE_COLUMNS.map((column) => (
-                      <th
-                        key={column.key}
-                        className="sortable"
-                        onClick={() => toggleSort(column.key)}
-                      >
-                        {column.label}
-                        {sortBy === column.key
-                          ? sortDir === "asc"
-                            ? " ▲"
-                            : " ▼"
-                          : ""}
-                      </th>
-                    ))}
-                    <th style={isAdmin ? undefined : { display: "none" }}>
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {usersFailed ? (
+        <div className="dashboard-card">
+          {isStaff && (
+            <div className="user-list-section">
+              <h2>Users</h2>
+              {isAdmin && (
+                <details ref={addUserDetailsRef}>
+                  <summary className="add-user-toggle">Add User</summary>
+                  <form className="add-user-form" onSubmit={handleAddUser}>
+                    <input
+                      type="email"
+                      name="email"
+                      placeholder="Email"
+                      required
+                    />
+                    <input
+                      type="password"
+                      name="password"
+                      placeholder="Temporary password"
+                      required
+                    />
+                    <button type="submit" className="login-button">
+                      Add User
+                    </button>
+                  </form>
+                </details>
+              )}
+              <div className="table-scroll">
+                <table className="user-table">
+                  <thead>
                     <tr>
-                      <td colSpan={4}>Failed to load users.</td>
+                      {SORTABLE_COLUMNS.map((column) => (
+                        <th
+                          key={column.key}
+                          className="sortable"
+                          onClick={() => toggleSort(column.key)}
+                        >
+                          {column.label}
+                          {sortBy === column.key
+                            ? sortDir === "asc"
+                              ? " ▲"
+                              : " ▼"
+                            : ""}
+                        </th>
+                      ))}
+                      <th style={isAdmin ? undefined : { display: "none" }}>
+                        Actions
+                      </th>
                     </tr>
-                  ) : (
-                    pageUsers.map((user) => {
-                      const actions: TableAction[] = [];
-                      if (!user.emailVerified) {
-                        actions.push({
-                          label: "Resend Verification",
-                          onClick: () =>
-                            withToken((authToken) =>
-                              callApi(
-                                authToken,
-                                `/api/users/${user.id}/resend-verification`,
-                                "POST",
-                              ).then(() => undefined),
-                            ),
-                        });
-                      }
-                      if (isAdmin) {
-                        actions.push({
-                          label: user.emailVerified ? "Unverify" : "Verify",
-                          onClick: () =>
-                            withToken(async (authToken) => {
-                              await callApi(
-                                authToken,
-                                `/api/users/${user.id}/verification`,
-                                "PATCH",
-                                { emailVerified: !user.emailVerified },
-                              );
-                              await loadUsers(authToken);
-                            }),
-                        });
-                        actions.push({
-                          label: "Reset Password",
-                          onClick: () =>
-                            withToken((authToken) =>
-                              callApi(
-                                authToken,
-                                `/api/users/${user.id}/reset-password`,
-                                "POST",
-                              ).then(() => undefined),
-                            ),
-                        });
-                        actions.push({
-                          label: "Delete",
-                          danger: true,
-                          onClick: () => {
-                            if (!window.confirm(`Delete ${user.email}?`))
-                              return;
-                            withToken(async (authToken) => {
-                              await callApi(
-                                authToken,
-                                `/api/users/${user.id}`,
-                                "DELETE",
-                              );
-                              await loadUsers(authToken);
-                            });
-                          },
-                        });
-                      }
+                  </thead>
+                  <tbody>
+                    {usersFailed ? (
+                      <tr>
+                        <td colSpan={4}>Failed to load users.</td>
+                      </tr>
+                    ) : (
+                      pageUsers.map((user) => {
+                        const actions: TableAction[] = [];
+                        if (!user.emailVerified) {
+                          actions.push({
+                            label: "Resend Verification",
+                            onClick: () =>
+                              withToken((authToken) =>
+                                callApi(
+                                  authToken,
+                                  `/api/users/${user.id}/resend-verification`,
+                                  "POST",
+                                ).then(() => undefined),
+                              ),
+                          });
+                        }
+                        if (isAdmin) {
+                          actions.push({
+                            label: user.emailVerified ? "Unverify" : "Verify",
+                            onClick: () =>
+                              withToken(async (authToken) => {
+                                await callApi(
+                                  authToken,
+                                  `/api/users/${user.id}/verification`,
+                                  "PATCH",
+                                  { emailVerified: !user.emailVerified },
+                                );
+                                await loadUsers(authToken);
+                              }),
+                          });
+                          actions.push({
+                            label: "Reset Password",
+                            onClick: () =>
+                              withToken((authToken) =>
+                                callApi(
+                                  authToken,
+                                  `/api/users/${user.id}/reset-password`,
+                                  "POST",
+                                ).then(() => undefined),
+                              ),
+                          });
+                          actions.push({
+                            label: "Delete",
+                            danger: true,
+                            onClick: () => {
+                              if (!window.confirm(`Delete ${user.email}?`))
+                                return;
+                              withToken(async (authToken) => {
+                                await callApi(
+                                  authToken,
+                                  `/api/users/${user.id}`,
+                                  "DELETE",
+                                );
+                                await loadUsers(authToken);
+                              });
+                            },
+                          });
+                        }
 
-                      return (
-                        <tr key={user.id}>
-                          <td>{user.email}</td>
-                          <td>
-                            {/* Admins get an editable dropdown (except on their
+                        return (
+                          <tr key={user.id}>
+                            <td>{user.email}</td>
+                            <td>
+                              {/* Admins get an editable dropdown (except on their
                                 own row — the backend also blocks self-demotion,
                                 but disabling here skips the round trip). */}
-                            {isAdmin && user.id !== me?.id ? (
-                              <select
-                                key={user.role}
-                                defaultValue={user.role}
-                                onChange={(
-                                  event: ChangeEvent<HTMLSelectElement>,
-                                ) =>
-                                  withToken(async (authToken) => {
-                                    await callApi(
-                                      authToken,
-                                      `/api/users/${user.id}/role`,
-                                      "PATCH",
-                                      { role: event.target.value },
-                                    );
-                                    await loadUsers(authToken);
-                                  })
-                                }
-                              >
-                                {ROLES.map((role) => (
-                                  <option key={role} value={role}>
-                                    {role}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              user.role
-                            )}
-                          </td>
-                          <td>{yesNo(user.emailVerified)}</td>
-                          <td>
-                            <ActionsCell actions={actions} />
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {pageCount > 1 && (
-              <div className="user-pager">
-                <button
-                  type="button"
-                  disabled={currentPage <= 1}
-                  onClick={() => setPage(currentPage - 1)}
-                >
-                  Prev
-                </button>
-                <span>
-                  Page {currentPage} of {pageCount}
-                </span>
-                <button
-                  type="button"
-                  disabled={currentPage >= pageCount}
-                  onClick={() => setPage(currentPage + 1)}
-                >
-                  Next
-                </button>
+                              {isAdmin && user.id !== me?.id ? (
+                                <select
+                                  key={user.role}
+                                  defaultValue={user.role}
+                                  onChange={(
+                                    event: ChangeEvent<HTMLSelectElement>,
+                                  ) =>
+                                    withToken(async (authToken) => {
+                                      await callApi(
+                                        authToken,
+                                        `/api/users/${user.id}/role`,
+                                        "PATCH",
+                                        { role: event.target.value },
+                                      );
+                                      await loadUsers(authToken);
+                                    })
+                                  }
+                                >
+                                  {ROLES.map((role) => (
+                                    <option key={role} value={role}>
+                                      {role}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                user.role
+                              )}
+                            </td>
+                            <td>{yesNo(user.emailVerified)}</td>
+                            <td>
+                              <ActionsCell actions={actions} />
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
-            )}
-          </div>
-        )}
-      </div>
+              {pageCount > 1 && (
+                <div className="user-pager">
+                  <button
+                    type="button"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage(currentPage - 1)}
+                  >
+                    Prev
+                  </button>
+                  <span>
+                    Page {currentPage} of {pageCount}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={currentPage >= pageCount}
+                    onClick={() => setPage(currentPage + 1)}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
-      <PageFooter
-        meta={
-          <span>
-            Role:{" "}
-            <span id="user-role" className="highlight">
-              {me?.role ?? "..."}
-            </span>{" "}
-            · Email verified:{" "}
-            <span id="user-verified" className="highlight">
-              {me ? yesNo(me.emailVerified) : "..."}
+        <PageFooter
+          meta={
+            <span>
+              Role:{" "}
+              <span id="user-role" className="highlight">
+                {me?.role ?? "..."}
+              </span>{" "}
+              · Email verified:{" "}
+              <span id="user-verified" className="highlight">
+                {me ? yesNo(me.emailVerified) : "..."}
+              </span>
             </span>
-          </span>
-        }
-      />
-    </div>
+          }
+        />
+      </div>
+    </AppShell>
   );
 }

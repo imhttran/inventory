@@ -438,14 +438,17 @@ pub async fn seed_dev_inventory(cfg: &Config, db: &PgPool) {
             return;
         };
         let product_id: Uuid = match sqlx::query_scalar(
-            "INSERT INTO products (sku, name, description, brand_id, category_id)
-             VALUES ($1, $2, $3, $4, $5) RETURNING id",
+            "INSERT INTO products (sku, name, description, brand_id, category_id, retail_price)
+             VALUES ($1, $2, $3, $4, $5, ROUND(CAST($6 AS numeric) * 1.6, 2))
+             RETURNING id",
         )
         .bind(seed.sku)
         .bind(seed.name)
         .bind(seed.description)
         .bind(brand_id)
         .bind(category_id)
+        // Same cost-plus rule as the 002 backfill: sellable out of the box.
+        .bind(seed.cost)
         .fetch_one(&mut *tx)
         .await
         {

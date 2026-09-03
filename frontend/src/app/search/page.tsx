@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { API_BASE, callApi, renewSessionFrom } from "@/lib/api";
 import { PageHeader } from "@/components/PageHeader";
 import { PageTitle } from "@/components/PageTitle";
+import { AppShell } from "@/components/AppShell";
 
 type MeUser = {
   id: number;
@@ -113,77 +114,75 @@ export default function SearchPage() {
   }, [me, query, runSearch]);
 
   return (
-    <div className="dashboard-container wide">
-      <PageTitle title="Search | Auto Parts" />
-      <PageHeader
-        title="Search"
-        subtitle="Find parts by name, SKU, part number, brand, or category."
-      >
-        <a className="logout-link" href="/dashboard">
-          Back to Dashboard
-        </a>
-      </PageHeader>
+    <AppShell>
+      <div className="dashboard-container wide">
+        <PageTitle title="Search | Auto Parts" />
+        <PageHeader
+          title="Search"
+          subtitle="Find parts by name, SKU, part number, brand, or category."
+        />
 
-      <div className="dashboard-card">
-        <div className="product-filters">
-          <input
-            type="search"
-            placeholder="Search parts — e.g. brake pads, 210-0427, Bosch…"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            aria-label="Search parts"
-            autoFocus
-          />
-          {results !== null && !failed && (
-            <span className="search-source">{SOURCE_LABEL[source]}</span>
-          )}
-        </div>
+        <div className="dashboard-card">
+          <div className="product-filters">
+            <input
+              type="search"
+              placeholder="Search parts — e.g. brake pads, 210-0427, Bosch…"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              aria-label="Search parts"
+              autoFocus
+            />
+            {results !== null && !failed && (
+              <span className="search-source">{SOURCE_LABEL[source]}</span>
+            )}
+          </div>
 
-        <div className="table-scroll">
-          <table className="user-table">
-            <thead>
-              <tr>
-                <th>SKU</th>
-                <th>Part #</th>
-                <th>Name</th>
-                <th>Brand</th>
-                <th>Category</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {results === null ? (
+          <div className="table-scroll">
+            <table className="user-table">
+              <thead>
                 <tr>
-                  <td colSpan={6}>
-                    {me ? "Type to search the catalog." : "Loading…"}
-                  </td>
+                  <th>SKU</th>
+                  <th>Part #</th>
+                  <th>Name</th>
+                  <th>Brand</th>
+                  <th>Category</th>
+                  <th />
                 </tr>
-              ) : failed ? (
-                <tr>
-                  <td colSpan={6}>Search failed. Is the backend running?</td>
-                </tr>
-              ) : results.length === 0 ? (
-                <tr>
-                  <td colSpan={6}>No parts match “{query}”.</td>
-                </tr>
-              ) : (
-                results.map((hit) => (
-                  <tr key={hit.id}>
-                    <td>{hit.sku}</td>
-                    <td>{hit.partNumber || "—"}</td>
-                    <td>{hit.name}</td>
-                    <td>{hit.brand}</td>
-                    <td>{hit.category}</td>
-                    <td>
-                      <a href={`/products/${hit.id}`}>View</a>
+              </thead>
+              <tbody>
+                {results === null ? (
+                  <tr>
+                    <td colSpan={6}>
+                      {me ? "Type to search the catalog." : "Loading…"}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : failed ? (
+                  <tr>
+                    <td colSpan={6}>Search failed. Is the backend running?</td>
+                  </tr>
+                ) : results.length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>No parts match “{query}”.</td>
+                  </tr>
+                ) : (
+                  results.map((hit) => (
+                    <tr key={hit.id}>
+                      <td>{hit.sku}</td>
+                      <td>{hit.partNumber || "—"}</td>
+                      <td>{hit.name}</td>
+                      <td>{hit.brand}</td>
+                      <td>{hit.category}</td>
+                      <td>
+                        <a href={`/products/${hit.id}`}>View</a>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }
