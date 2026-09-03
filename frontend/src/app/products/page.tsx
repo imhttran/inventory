@@ -8,10 +8,13 @@ import {
   type FormEvent,
 } from "react";
 import { API_BASE, callApi, renewSessionFrom } from "@/lib/api";
+import { formKeys } from "@/lib/formKeys";
 import { hasRole } from "@/lib/roles";
 import { PageHeader } from "@/components/PageHeader";
 import { PageTitle } from "@/components/PageTitle";
 import { AppShell } from "@/components/AppShell";
+import { Field } from "@/components/Field";
+import { FormStatus, type FormStatusState } from "@/components/FormStatus";
 
 type MeUser = {
   id: number;
@@ -93,10 +96,36 @@ export default function ProductsPage() {
   const [categoryFilter, setCategoryFilter] = useState("");
   const [formBrandId, setFormBrandId] = useState("");
   const [formCategoryId, setFormCategoryId] = useState("");
+  // Inline save result for the Add Product form.
+  const [status, setStatus] = useState<FormStatusState>(null);
+  // Bumped on open and after each add to remount a blank form.
+  const [formNonce, setFormNonce] = useState(0);
   const addProductRef = useRef<HTMLDetailsElement>(null);
+  const skuInputRef = useRef<HTMLInputElement>(null);
 
   const isStaff = me ? hasRole(me.role, "staff") : false;
   const canSubmitProduct = formBrandId !== "" && formCategoryId !== "";
+
+  // After the form mounts open or remounts blank (reopen / post-add), put the
+  // cursor in the SKU field — entry continues without a mouse. Skipped when
+  // closed so focus is never stolen from the page.
+  useEffect(() => {
+    if (addProductRef.current?.open) skuInputRef.current?.focus();
+  }, [formNonce]);
+
+  const closeForm = () => {
+    if (addProductRef.current) addProductRef.current.open = false;
+    addProductRef.current?.querySelector("summary")?.focus();
+  };
+
+  // Reopening always starts blank, including the brand/category selects.
+  const handleToggle = () => {
+    if (!addProductRef.current?.open) return;
+    setFormNonce((n) => n + 1);
+    setFormBrandId("");
+    setFormCategoryId("");
+    setStatus(null);
+  };
 
   const loadProducts = useCallback(
     async (
@@ -249,8 +278,7 @@ export default function ProductsPage() {
     event.preventDefault();
     const authToken = localStorage.getItem("auth_token");
     if (!authToken) return;
-    const form = event.currentTarget;
-    const data = new FormData(form);
+    const data = new FormData(event.currentTarget);
     void (async () => {
       const result = await sendJson(authToken, "/api/v1/products", "POST", {
         sku: data.get("sku"),
@@ -262,15 +290,15 @@ export default function ProductsPage() {
         retailPrice: String(data.get("retailPrice") ?? "").trim() || undefined,
       });
       if (result.ok) {
-        alert(result.message);
-        form.reset();
+        // Batch entry: stay open, blank the form, cursor back on SKU.
+        setStatus({ kind: "ok", text: result.message });
         setFormBrandId("");
         setFormCategoryId("");
-        if (addProductRef.current) addProductRef.current.open = false;
+        setFormNonce((n) => n + 1);
         setPage(1);
         await loadProducts(authToken, 1, q, brandFilter, categoryFilter);
       } else {
-        alert(`Error: ${result.message}`);
+        setStatus({ kind: "error", text: `Error: ${result.message}` });
       }
     })();
   };
@@ -295,74 +323,122 @@ export default function ProductsPage() {
 
         {isStaff && (
           <div className="dashboard-card">
-            <details ref={addProductRef}>
+            <details ref={addProductRef} onToggle={handleToggle}>
               <summary className="add-user-toggle">Add Product</summary>
-              <form className="add-user-form" onSubmit={handleAddProduct}>
-                <input type="text" name="sku" placeholder="SKU" required />
-                <input type="text" name="name" placeholder="Name" required />
-                <input
-                  type="text"
-                  name="partNumber"
-                  placeholder="Part number (MPN)"
-                />
-                <input
-                  type="text"
-                  name="retailPrice"
-                  placeholder="Retail price"
-                  inputMode="decimal"
-                />
-                <input
-                  type="text"
-                  name="description"
-                  placeholder="Description"
-                />
-                <select
-                  value={formBrandId}
-                  onChange={(event) => setFormBrandId(event.target.value)}
-                  aria-label="Brand"
-                >
-                  <option value="">— No brand —</option>
-                  {brands.map((brand) => (
-                    <option key={brand.id} value={brand.id}>
-                      {brand.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="login-button"
-                  onClick={() => addLookup("brands")}
-                >
-                  + Brand
-                </button>
-                <select
-                  value={formCategoryId}
-                  onChange={(event) => setFormCategoryId(event.target.value)}
-                  aria-label="Category"
-                >
-                  <option value="">— No category —</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="login-button"
-                  onClick={() => addLookup("categories")}
-                >
-                  + Category
-                </button>
-                <button
-                  type="submit"
-                  className="login-button"
-                  disabled={!canSubmitProduct}
-                >
-                  Add Product
-                </button>
+              <form
+                key={`new-${formNonce}`}
+                className="add-user-form entry-form"
+                onSubmit={handleAddProduct}
+                onKeyDown={formKeys(closeForm)}
+              >
+                <p className="form-hint">
+                  Enter moves to the next field; Enter on the last field saves.
+                  Esc closes.
+                </p>
+                <div className="field-grid">
+                  <Field label="SKU" span={2}>
+                    <input
+                      ref={skuInputRef}
+                      type="text"
+                      name="sku"
+                      placeholder="SKU"
+                      autoComplete="off"
+                      required
+                    />
+                  </Field>
+                  <Field label="Name" span={2}>
+                    <input
+                      type="text"
+                      name="name"
+                      placeholder="Name"
+                      autoComplete="off"
+                      required
+                    />
+                  </Field>
+                  <Field label="Part number (MPN)" span={2}>
+                    <input
+                      type="text"
+                      name="partNumber"
+                      placeholder="Part number (MPN)"
+                      autoComplete="off"
+                    />
+                  </Field>
+                  <Field label="Retail price" span={2}>
+                    <input
+                      type="text"
+                      name="retailPrice"
+                      placeholder="Retail price"
+                      inputMode="decimal"
+                      autoComplete="off"
+                    />
+                  </Field>
+                  <Field label="Description" span={4}>
+                    <input
+                      type="text"
+                      name="description"
+                      placeholder="Description"
+                      autoComplete="off"
+                    />
+                  </Field>
+                  <Field label="Brand" span={2}>
+                    <div className="field-row">
+                      <select
+                        value={formBrandId}
+                        onChange={(event) => setFormBrandId(event.target.value)}
+                      >
+                        <option value="">— No brand —</option>
+                        {brands.map((brand) => (
+                          <option key={brand.id} value={brand.id}>
+                            {brand.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="login-button"
+                        onClick={() => addLookup("brands")}
+                      >
+                        + Brand
+                      </button>
+                    </div>
+                  </Field>
+                  <Field label="Category" span={2}>
+                    <div className="field-row">
+                      <select
+                        value={formCategoryId}
+                        onChange={(event) =>
+                          setFormCategoryId(event.target.value)
+                        }
+                      >
+                        <option value="">— No category —</option>
+                        {categories.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="login-button"
+                        onClick={() => addLookup("categories")}
+                      >
+                        + Category
+                      </button>
+                    </div>
+                  </Field>
+                </div>
+                <div className="form-actions">
+                  <button
+                    type="submit"
+                    className="login-button"
+                    disabled={!canSubmitProduct}
+                  >
+                    Add Product
+                  </button>
+                </div>
               </form>
             </details>
+            <FormStatus status={status} />
           </div>
         )}
 

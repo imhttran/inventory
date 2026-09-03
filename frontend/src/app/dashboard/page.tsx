@@ -11,12 +11,15 @@ import {
   type ReactEventHandler,
 } from "react";
 import { API_BASE, callApi, renewSessionFrom } from "@/lib/api";
+import { formKeys } from "@/lib/formKeys";
 import { ROLES, hasRole } from "@/lib/roles";
 import { PageHeader } from "@/components/PageHeader";
 import { SystemStatus } from "@/components/SystemStatus";
 import { PageFooter } from "@/components/PageFooter";
 import { PageTitle } from "@/components/PageTitle";
 import { AppShell } from "@/components/AppShell";
+import { Field } from "@/components/Field";
+import { FormStatus, type FormStatusState } from "@/components/FormStatus";
 
 const USERS_PER_PAGE = 10;
 
@@ -142,7 +145,31 @@ export default function DashboardPage() {
   const [sortBy, setSortBy] = useState<SortKey>("email");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
+  // Inline save result for the Add User form.
+  const [status, setStatus] = useState<FormStatusState>(null);
+  // Bumped on open and after each add to remount a blank form.
+  const [formNonce, setFormNonce] = useState(0);
   const addUserDetailsRef = useRef<HTMLDetailsElement>(null);
+  const emailInputRef = useRef<HTMLInputElement>(null);
+
+  // After the form mounts open or remounts blank (reopen / post-add), put the
+  // cursor in the email field — entry continues without a mouse. Skipped when
+  // closed so focus is never stolen from the page.
+  useEffect(() => {
+    if (addUserDetailsRef.current?.open) emailInputRef.current?.focus();
+  }, [formNonce]);
+
+  const closeForm = () => {
+    if (addUserDetailsRef.current) addUserDetailsRef.current.open = false;
+    addUserDetailsRef.current?.querySelector("summary")?.focus();
+  };
+
+  // Add mode always opens blank; focus follows via the remount effect above.
+  const handleToggle = () => {
+    if (!addUserDetailsRef.current?.open) return;
+    setFormNonce((n) => n + 1);
+    setStatus(null);
+  };
 
   const isAdmin = me ? hasRole(me.role, "admin") : false;
   const isStaff = me ? hasRole(me.role, "staff") : false;
@@ -259,20 +286,23 @@ export default function DashboardPage() {
     event.preventDefault();
     const authToken = localStorage.getItem("auth_token");
     if (!authToken) return;
-    const form = event.currentTarget;
-    const data = new FormData(form);
+    const data = new FormData(event.currentTarget);
     void (async () => {
       const result = await callApi(authToken, "/api/users", "POST", {
         email: data.get("email"),
         password: data.get("password"),
       });
       if (result) {
-        form.reset();
-        if (addUserDetailsRef.current) addUserDetailsRef.current.open = false;
+        // Batch entry: stay open, blank the form, cursor back on email.
+        setStatus({ kind: "ok", text: result.message ?? "User created" });
+        setFormNonce((n) => n + 1);
         setSortBy("email");
         setSortDir("asc");
         setPage(1);
         await loadUsers(authToken);
+      } else {
+        // callApi drops the failure body, so this stays generic.
+        setStatus({ kind: "error", text: "Could not create user." });
       }
     })();
   };
@@ -313,26 +343,49 @@ export default function DashboardPage() {
             <div className="user-list-section">
               <h2>Users</h2>
               {isAdmin && (
-                <details ref={addUserDetailsRef}>
-                  <summary className="add-user-toggle">Add User</summary>
-                  <form className="add-user-form" onSubmit={handleAddUser}>
-                    <input
-                      type="email"
-                      name="email"
-                      placeholder="Email"
-                      required
-                    />
-                    <input
-                      type="password"
-                      name="password"
-                      placeholder="Temporary password"
-                      required
-                    />
-                    <button type="submit" className="login-button">
-                      Add User
-                    </button>
-                  </form>
-                </details>
+                <>
+                  <details ref={addUserDetailsRef} onToggle={handleToggle}>
+                    <summary className="add-user-toggle">Add User</summary>
+                    <form
+                      key={`new-${formNonce}`}
+                      className="add-user-form entry-form"
+                      onSubmit={handleAddUser}
+                      onKeyDown={formKeys(closeForm)}
+                    >
+                      <p className="form-hint">
+                        Enter moves to the next field; Enter on the last field
+                        saves. Esc closes.
+                      </p>
+                      <div className="field-grid">
+                        <Field label="Email" span={2}>
+                          <input
+                            ref={emailInputRef}
+                            type="email"
+                            name="email"
+                            placeholder="name@example.com"
+                            autoComplete="email"
+                            required
+                          />
+                        </Field>
+                        <Field label="Temporary password" span={2}>
+                          <input
+                            type="password"
+                            name="password"
+                            placeholder="Temporary password"
+                            autoComplete="new-password"
+                            required
+                          />
+                        </Field>
+                      </div>
+                      <div className="form-actions">
+                        <button type="submit" className="login-button">
+                          Add User
+                        </button>
+                      </div>
+                    </form>
+                  </details>
+                  <FormStatus status={status} />
+                </>
               )}
               <div className="table-scroll">
                 <table className="user-table">

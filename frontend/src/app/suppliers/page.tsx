@@ -8,10 +8,13 @@ import {
   type FormEvent,
 } from "react";
 import { API_BASE, callApi, renewSessionFrom } from "@/lib/api";
+import { formKeys } from "@/lib/formKeys";
 import { hasRole } from "@/lib/roles";
 import { PageHeader } from "@/components/PageHeader";
 import { PageTitle } from "@/components/PageTitle";
 import { AppShell } from "@/components/AppShell";
+import { Field } from "@/components/Field";
+import { FormStatus, type FormStatusState } from "@/components/FormStatus";
 
 type MeUser = {
   id: number;
@@ -88,7 +91,12 @@ export default function SuppliersPage() {
   // Null = create mode; a supplier id = edit that supplier in the same form.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  // Inline save result (success/error) shown under the form card.
+  const [status, setStatus] = useState<FormStatusState>(null);
+  // Bumped after each successful add to remount a blank form for the next entry.
+  const [formNonce, setFormNonce] = useState(0);
   const addFormRef = useRef<HTMLDetailsElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   const isStaff = me ? hasRole(me.role, "staff") : false;
   const isAdmin = me ? hasRole(me.role, "admin") : false;
@@ -148,42 +156,77 @@ export default function SuppliersPage() {
     void run(authToken);
   }, []);
 
+  // After the form mounts open or remounts (edit seed / post-add reset), put
+  // the cursor in the name field — entry continues without a mouse. Skipped
+  // when the form is closed so focus is never stolen from the page.
+  useEffect(() => {
+    if (addFormRef.current?.open) nameInputRef.current?.focus();
+  }, [formNonce, editingId]);
+
+  const focusToggle = () => {
+    addFormRef.current?.querySelector("summary")?.focus();
+  };
+
+  const closeForm = () => {
+    if (addFormRef.current) addFormRef.current.open = false;
+    focusToggle();
+  };
+
   const startEdit = (supplier: Supplier) => {
     setEditingId(supplier.id);
     setEditingSupplier(supplier);
-    if (addFormRef.current) addFormRef.current.open = true;
+    setStatus(null);
+    if (addFormRef.current && !addFormRef.current.open) {
+      addFormRef.current.open = true;
+    }
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setEditingSupplier(null);
-    if (addFormRef.current) addFormRef.current.open = false;
+    setStatus(null);
+    closeForm();
+  };
+
+  // Add mode always opens blank; focus follows via the remount effect above.
+  const handleToggle = () => {
+    if (!addFormRef.current?.open) return;
+    if (!editingId) setFormNonce((n) => n + 1);
+    setStatus(null);
   };
 
   const handleSave = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const wasEditing = editingId;
     const data = new FormData(event.currentTarget);
     const body: Record<string, string> = {};
     for (const field of FORM_FIELDS) {
       body[field] = String(data.get(field) ?? "").trim();
     }
     withToken(async (authToken) => {
-      const result = editingId
+      const result = wasEditing
         ? await sendJson(
             authToken,
-            `/api/v1/suppliers/${editingId}`,
+            `/api/v1/suppliers/${wasEditing}`,
             "PUT",
             body,
           )
         : await sendJson(authToken, "/api/v1/suppliers", "POST", body);
       if (result.ok) {
-        alert(result.message);
-        setEditingId(null);
-        setEditingSupplier(null);
-        if (addFormRef.current) addFormRef.current.open = false;
+        setStatus({ kind: "ok", text: result.message });
+        if (wasEditing) {
+          setEditingId(null);
+          setEditingSupplier(null);
+          if (addFormRef.current) addFormRef.current.open = false;
+          focusToggle();
+        } else {
+          // Batch entry: stay open, blank the form, and put the cursor back
+          // on the name field for the next supplier (remount effect).
+          setFormNonce((n) => n + 1);
+        }
         await loadSuppliers(authToken);
       } else {
-        alert(`Error: ${result.message}`);
+        setStatus({ kind: "error", text: `Error: ${result.message}` });
       }
     });
   };
@@ -224,91 +267,136 @@ export default function SuppliersPage() {
 
         {isStaff && (
           <div className="dashboard-card">
-            <details ref={addFormRef}>
+            <details ref={addFormRef} onToggle={handleToggle}>
               <summary className="add-user-toggle">
                 {editingId ? "Edit Supplier" : "Add Supplier"}
               </summary>
-              {/* key: defaults must re-seed whenever the edited row changes. */}
+              {/* key: defaults must re-seed whenever the edited row changes,
+                and after each successful add so the next entry starts blank. */}
               <form
-                key={editingId ?? "new"}
-                className="add-user-form"
+                key={editingId ?? `new-${formNonce}`}
+                className="add-user-form entry-form"
                 onSubmit={handleSave}
-              >
-                <input
-                  type="text"
-                  name="name"
-                  placeholder="Supplier name"
-                  defaultValue={editingSupplier?.name ?? ""}
-                  required
-                />
-                <input
-                  type="text"
-                  name="supplierCode"
-                  placeholder="Supplier code"
-                  defaultValue={editingSupplier?.supplierCode ?? ""}
-                />
-                <input
-                  type="tel"
-                  name="phone"
-                  placeholder="Phone"
-                  defaultValue={editingSupplier?.phone ?? ""}
-                />
-                <input
-                  type="email"
-                  name="email"
-                  placeholder="Email"
-                  defaultValue={editingSupplier?.email ?? ""}
-                />
-                <input
-                  type="text"
-                  name="addressLine1"
-                  placeholder="Address line 1"
-                  defaultValue={editingSupplier?.addressLine1 ?? ""}
-                />
-                <input
-                  type="text"
-                  name="addressLine2"
-                  placeholder="Address line 2"
-                  defaultValue={editingSupplier?.addressLine2 ?? ""}
-                />
-                <input
-                  type="text"
-                  name="city"
-                  placeholder="City"
-                  defaultValue={editingSupplier?.city ?? ""}
-                />
-                <input
-                  type="text"
-                  name="state"
-                  placeholder="State"
-                  defaultValue={editingSupplier?.state ?? ""}
-                />
-                <input
-                  type="text"
-                  name="postalCode"
-                  placeholder="Postal code"
-                  defaultValue={editingSupplier?.postalCode ?? ""}
-                />
-                <input
-                  type="text"
-                  name="country"
-                  placeholder="Country (USA)"
-                  defaultValue={editingSupplier?.country ?? ""}
-                />
-                <button type="submit" className="login-button">
-                  {editingId ? "Save Changes" : "Add Supplier"}
-                </button>
-                {editingId && (
-                  <button
-                    type="button"
-                    className="login-button"
-                    onClick={cancelEdit}
-                  >
-                    Cancel
-                  </button>
+                onKeyDown={formKeys(() =>
+                  editingId ? cancelEdit() : closeForm(),
                 )}
+              >
+                <p className="form-hint">
+                  Enter moves to the next field; Enter on the last field saves.
+                  Esc closes.
+                </p>
+                <div className="field-grid">
+                  <Field label="Name" span={2}>
+                    <input
+                      ref={nameInputRef}
+                      type="text"
+                      name="name"
+                      placeholder="Acme Auto Parts"
+                      autoComplete="organization"
+                      defaultValue={editingSupplier?.name ?? ""}
+                      required
+                    />
+                  </Field>
+                  <Field label="Supplier code" span={2}>
+                    <input
+                      type="text"
+                      name="supplierCode"
+                      placeholder="SUP-001"
+                      autoComplete="off"
+                      defaultValue={editingSupplier?.supplierCode ?? ""}
+                    />
+                  </Field>
+                  <Field label="Phone" span={2}>
+                    <input
+                      type="tel"
+                      name="phone"
+                      placeholder="Phone"
+                      autoComplete="tel"
+                      defaultValue={editingSupplier?.phone ?? ""}
+                    />
+                  </Field>
+                  <Field label="Email" span={2}>
+                    <input
+                      type="email"
+                      name="email"
+                      placeholder="Email"
+                      autoComplete="email"
+                      defaultValue={editingSupplier?.email ?? ""}
+                    />
+                  </Field>
+                  <Field label="Address line 1" span={4}>
+                    <input
+                      type="text"
+                      name="addressLine1"
+                      placeholder="Street address"
+                      autoComplete="address-line1"
+                      defaultValue={editingSupplier?.addressLine1 ?? ""}
+                    />
+                  </Field>
+                  <Field label="Address line 2" span={4}>
+                    <input
+                      type="text"
+                      name="addressLine2"
+                      placeholder="Apt, suite, unit"
+                      autoComplete="address-line2"
+                      defaultValue={editingSupplier?.addressLine2 ?? ""}
+                    />
+                  </Field>
+                  <Field label="City">
+                    <input
+                      type="text"
+                      name="city"
+                      placeholder="City"
+                      autoComplete="address-level2"
+                      defaultValue={editingSupplier?.city ?? ""}
+                    />
+                  </Field>
+                  <Field label="State">
+                    <input
+                      type="text"
+                      name="state"
+                      placeholder="State"
+                      autoComplete="address-level1"
+                      defaultValue={editingSupplier?.state ?? ""}
+                    />
+                  </Field>
+                  <Field label="Postal code">
+                    <input
+                      type="text"
+                      name="postalCode"
+                      placeholder="Postal code"
+                      autoComplete="postal-code"
+                      defaultValue={editingSupplier?.postalCode ?? ""}
+                    />
+                  </Field>
+                  <Field label="Country">
+                    <input
+                      type="text"
+                      name="country"
+                      placeholder="Country"
+                      autoComplete="country-name"
+                      defaultValue={editingSupplier?.country ?? "USA"}
+                    />
+                  </Field>
+                </div>
+                <div className="form-actions">
+                  <button type="submit" className="login-button">
+                    {editingId ? "Save Changes" : "Add Supplier"}
+                  </button>
+                  {editingId && (
+                    <button
+                      type="button"
+                      className="login-button"
+                      onClick={cancelEdit}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
               </form>
             </details>
+            {/* Outside the details so it stays visible after the form closes. */}
+            <FormStatus status={status} />
           </div>
         )}
 

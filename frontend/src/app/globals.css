@@ -519,6 +519,111 @@ body {
     padding: 0.6rem 1rem;
 }
 
+/* Data-entry forms (suppliers, products, users): labeled 4-column grid
+   grouped by meaning, instead of one stretched flex row spanning the card. */
+.entry-form {
+    display: block;
+}
+
+.form-hint {
+    margin: 0 0 10px;
+    text-align: left;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.field-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px 14px;
+    margin: 0 0 14px;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.field input {
+    width: 100%;
+    padding: 0.6rem;
+    background-color: var(--raised-color);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 400;
+}
+
+.field input:focus {
+    outline: none;
+    border-color: var(--primary-fg);
+    box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* Select + lookup button pair (Add Product brand/category). */
+.field-row {
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+}
+
+.field-row select {
+    flex: 1;
+    width: 100%;
+    min-width: 0;
+    font-weight: 400;
+}
+
+.field-row .login-button {
+    flex: none;
+}
+
+.field-grid .span-2 {
+    grid-column: span 2;
+}
+
+.field-grid .span-4 {
+    grid-column: span 4;
+}
+
+.form-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Save result, kept outside the collapsible form so it survives closing. */
+.form-status {
+    margin: 10px 0 0;
+    text-align: left;
+    font-size: 0.8125rem;
+}
+
+.form-status.ok {
+    color: var(--ok-color);
+}
+
+.form-status.error {
+    color: var(--danger-color);
+}
+
+@media (max-width: 720px) {
+    .field-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .field-grid .span-4 {
+        grid-column: span 2;
+    }
+}
+
 /* Horizontal scroll instead of blowing out the page layout when the table
    (4 columns + action buttons) is wider than the viewport, e.g. on mobile. */
 .table-scroll {
